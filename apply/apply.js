@@ -50,7 +50,6 @@
   };
 
   const commonSteps = [
-    { field: "cdl_upload", label: "Optional document", title: "Want to get ahead?", help: "You can securely upload your CDL now, or continue without it.", type: "documents" },
     { field: "full_name", label: "About you", title: "Let’s start with your name.", help: "Enter your full legal name.", type: "text", inputType: "text", placeholder: "Full name", autocomplete: "name" },
     { field: "phone", label: "Contact details", title: "What’s the best phone number to reach you?", help: "Include your area code.", type: "text", inputType: "tel", placeholder: "(555) 555-5555", autocomplete: "tel" },
     { field: "email", label: "Contact details", title: "What’s your email address?", help: "We’ll use this only to contact you about your application.", type: "text", inputType: "email", placeholder: "you@example.com", autocomplete: "email" },
@@ -72,7 +71,7 @@
 
   function steps() {
     if (!state.driverType) return [];
-    return [...commonSteps, ...(state.driverType === "owner_operator" ? ownerSteps : companySteps), { type: "review" }];
+    return [...commonSteps, ...(state.driverType === "owner_operator" ? ownerSteps : companySteps), { field: "cdl_upload", label: "Optional document", title: "Want to get ahead?", help: "You can securely upload your CDL now, or continue without it.", type: "documents" }, { type: "review" }];
   }
 
   function persist() {
