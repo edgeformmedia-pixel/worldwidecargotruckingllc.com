@@ -7,6 +7,7 @@
   <title>Request a Freight Quote | Worldwide Cargo Express</title>
   <link rel="stylesheet" href="../quote/quote.css">
   <script src="../api-client.js"></script>
+  <script src="../account/verification.js" defer></script>
   <script src="../quote/quote.js" defer></script>
 </head>
 <body>
@@ -17,7 +18,7 @@
 
     <section class="role-card" id="roleCard">
       <p class="eyebrow">Before we begin</p><h2>What best describes you?</h2>
-      <div class="role-grid"><button type="button" data-role="broker"><strong>Freight broker</strong><span>I’m arranging transportation for a customer</span></button><button type="button" data-role="shipper"><strong>Direct shipper</strong><span>I’m shipping my company’s freight</span></button></div>
+      <div class="role-grid"><button type="button" data-role="broker"><strong>Freight broker</strong><span>I’m arranging transportation for a customer</span></button><button type="button" data-role="shipper"><strong>Direct shipper</strong><span>I’m shipping my company’s freight</span></button><button type="button" data-role="driver"><strong>I’m a driver</strong><span>Take me to the driver application</span></button></div>
       <p class="error" id="roleError"></p>
     </section>
 
@@ -71,6 +72,7 @@
 
     <section class="success" id="quoteSuccess" hidden><div class="check">✓</div><p class="eyebrow">Quote received</p><h2>Your request is in.</h2><p id="quoteAccountIntro">Your customer account has been created. Choose a password to track this quote and future requests.</p>
       <form id="quoteAccountForm"><label>Password<input id="quotePassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" required></label><label>Confirm password<input id="quoteConfirmPassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" required></label><p class="hint">Use at least 10 characters.</p><p class="error" id="quoteAccountError"></p><button type="submit">Activate account →</button></form>
+      <div class="verification" id="quoteVerification" hidden><p>We sent a five-digit code to <strong data-verification-email></strong>.</p><form><label>Verification code<input data-verification-code inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{5}" maxlength="5" required></label><p class="error" data-verification-error></p><button type="submit">Verify email →</button></form><button class="resend-code" data-resend-code type="button">Send a new code</button></div>
       <a id="quoteExistingLink" href="../account/index.html" hidden>Sign in to your existing account</a>
     </section>
   </main>

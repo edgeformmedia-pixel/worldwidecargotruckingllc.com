@@ -84,6 +84,19 @@ type QuoteRow = {
   submitted_at: string | null;
 };
 
+type VerificationPurpose = "activate" | "reset";
+
+type VerificationRow = {
+  id: string;
+  account_id: string;
+  purpose: VerificationPurpose;
+  code_hash: string;
+  expires_at: string;
+  attempts: number;
+  consumed_at: string | null;
+  created_at: string;
+};
+
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
@@ -119,6 +132,9 @@ function cdlExtension(contentType: string | undefined): string {
 const PASSWORD_ITERATIONS = 100_000;
 const ACCOUNT_ROLES = new Set(["driver", "broker", "shipper"]);
 const DRIVER_TYPES = new Set(["owner_operator", "company_driver"]);
+const VERIFICATION_CODE_TTL_MS = 10 * 60 * 1000;
+const VERIFICATION_RESEND_DELAY_MS = 60 * 1000;
+const MAX_VERIFICATION_ATTEMPTS = 5;
 const QUOTE_FIELDS = {
   full_name: 120, company_name: 160, email: 180, phone: 30, mc_number: 30, reference_number: 80,
   pickup_city: 100, pickup_state: 40, pickup_zip: 12, pickup_date: 20, pickup_window: 80,
@@ -134,6 +150,101 @@ function json(data: unknown, status = 200, extraHeaders?: HeadersInit): Response
     status,
     headers: { ...JSON_HEADERS, ...extraHeaders },
   });
+}
+
+function escapeHtml(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+}
+
+function maskedEmail(email: string): string {
+  const [local, domain] = email.split("@");
+  if (!local || !domain) return email;
+  return `${local.slice(0, 2)}${"•".repeat(Math.max(2, Math.min(6, local.length - 2)))}@${domain}`;
+}
+
+async function sendEmail(env: Env, details: { to: string; subject: string; html: string; text: string }): Promise<void> {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({ from: env.EMAIL_FROM, ...details }),
+  });
+  if (!response.ok) {
+    const message = await response.text();
+    console.error(JSON.stringify({ message: "email delivery failed", status: response.status, detail: message.slice(0, 500) }));
+    throw new Error("Email delivery failed");
+  }
+}
+
+function emailShell(title: string, message: string, code?: string): string {
+  const codeBlock = code
+    ? `<div style="margin:28px 0;padding:18px 22px;background:#f3f6f9;border-left:4px solid #d31932;font:700 32px/1.2 Arial,sans-serif;letter-spacing:8px;color:#062b5a">${escapeHtml(code)}</div>`
+    : "";
+  return `<!doctype html><html><body style="margin:0;background:#f3f6f9;padding:32px 16px;color:#13263c;font-family:Arial,sans-serif"><table role="presentation" style="width:100%;max-width:620px;margin:auto;background:#fff;border-collapse:collapse"><tr><td style="height:6px;background:#d31932"></td></tr><tr><td style="padding:38px"><p style="margin:0 0 10px;color:#d31932;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase">Worldwide Cargo Express</p><h1 style="margin:0 0 18px;color:#062b5a;font-size:28px">${escapeHtml(title)}</h1><p style="margin:0;color:#4c5e72;font-size:16px;line-height:1.65">${escapeHtml(message)}</p>${codeBlock}<p style="margin:24px 0 0;color:#66768a;font-size:13px;line-height:1.6">If you did not request this, you can safely ignore this email. This mailbox is not monitored.</p></td></tr></table></body></html>`;
+}
+
+function newVerificationCode(): string {
+  const bytes = new Uint32Array(1);
+  crypto.getRandomValues(bytes);
+  return String(10_000 + (bytes[0] % 90_000));
+}
+
+async function verificationCodeHash(accountId: string, purpose: VerificationPurpose, code: string, env: Env): Promise<string> {
+  return hmac(`wcx-verification:${accountId}:${purpose}:${code}`, env.AUTH_SECRET);
+}
+
+async function issueVerificationCode(env: Env, account: AccountRow, purpose: VerificationPurpose, enforceDelay = false): Promise<void> {
+  const latest = await env.DB.prepare(
+    "SELECT * FROM email_verifications WHERE account_id = ?1 AND purpose = ?2 ORDER BY created_at DESC LIMIT 1",
+  ).bind(account.id, purpose).first<VerificationRow>();
+  if (enforceDelay && latest && Date.now() - Date.parse(`${latest.created_at}${latest.created_at.endsWith("Z") ? "" : "Z"}`) < VERIFICATION_RESEND_DELAY_MS) {
+    throw new Error("Please wait a minute before requesting another code.");
+  }
+  const code = newVerificationCode();
+  const now = new Date();
+  await env.DB.prepare(
+    "INSERT INTO email_verifications (id, account_id, purpose, code_hash, expires_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+  ).bind(crypto.randomUUID(), account.id, purpose, await verificationCodeHash(account.id, purpose, code, env), new Date(now.getTime() + VERIFICATION_CODE_TTL_MS).toISOString(), now.toISOString()).run();
+  const activation = purpose === "activate";
+  const title = activation ? "Verify your email" : "Reset your password";
+  const message = activation
+    ? `Hi ${account.full_name.split(/\s+/u)[0] || "there"}, enter this five-digit code to finish creating your Worldwide Cargo Express account. It expires in 10 minutes.`
+    : "Enter this five-digit code to choose a new password. It expires in 10 minutes.";
+  await sendEmail(env, {
+    to: account.email,
+    subject: activation ? `${code} is your Worldwide Cargo Express verification code` : `${code} is your password reset code`,
+    html: emailShell(title, message, code),
+    text: `${title}\n\n${message}\n\nCode: ${code}\n\nIf you did not request this, you can ignore this email.`,
+  });
+}
+
+async function consumeVerificationCode(env: Env, account: AccountRow, purpose: VerificationPurpose, code: string): Promise<boolean> {
+  const verification = await env.DB.prepare(
+    "SELECT * FROM email_verifications WHERE account_id = ?1 AND purpose = ?2 AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1",
+  ).bind(account.id, purpose).first<VerificationRow>();
+  if (!verification || Date.parse(verification.expires_at) <= Date.now() || verification.attempts >= MAX_VERIFICATION_ATTEMPTS) return false;
+  const matches = await secureEqual(verification.code_hash, await verificationCodeHash(account.id, purpose, code, env));
+  if (!matches) {
+    await env.DB.prepare("UPDATE email_verifications SET attempts = attempts + 1 WHERE id = ?1").bind(verification.id).run();
+    return false;
+  }
+  await env.DB.prepare("UPDATE email_verifications SET consumed_at = ?1 WHERE id = ?2").bind(new Date().toISOString(), verification.id).run();
+  return true;
+}
+
+async function verifyTurnstile(request: Request, token: unknown, env: Env): Promise<boolean> {
+  if (typeof token !== "string" || token.length < 1 || token.length > 4096) return false;
+  const form = new FormData();
+  form.set("secret", env.TURNSTILE_SECRET_KEY);
+  form.set("response", token);
+  const ip = request.headers.get("cf-connecting-ip");
+  if (ip) form.set("remoteip", ip);
+  try {
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: form });
+    const result = await response.json<{ success?: boolean; hostname?: string }>();
+    return response.ok && result.success === true;
+  } catch {
+    return false;
+  }
 }
 
 function errorResponse(message: string, status: number): Response {
@@ -408,6 +519,9 @@ async function submitApplication(request: Request, env: Env, id: string): Promis
   const body = await readJson(request);
   const editToken = body?.editToken;
   if (typeof editToken !== "string") return errorResponse("Invalid submission.", 400);
+  if (!(await verifyTurnstile(request, body?.captchaToken, env))) {
+    return errorResponse("Please complete the CAPTCHA and try again.", 400);
+  }
   const tokenHash = await sha256(editToken);
   const row = await env.DB.prepare(
     "SELECT * FROM applications WHERE id = ?1 AND edit_token_hash = ?2 LIMIT 1",
@@ -457,9 +571,14 @@ async function activateAccount(request: Request, env: Env): Promise<Response> {
   const record = await newPasswordRecord(password, env.AUTH_SECRET);
   const now = new Date().toISOString();
   await env.DB.prepare(
-    "UPDATE accounts SET password_salt = ?1, password_hash = ?2, password_iterations = ?3, status = 'active', updated_at = ?4 WHERE id = ?5 AND status = 'pending'",
+    "UPDATE accounts SET password_salt = ?1, password_hash = ?2, password_iterations = ?3, updated_at = ?4 WHERE id = ?5 AND status = 'pending'",
   ).bind(record.salt, record.hash, record.iterations, now, account.id).run();
-  return json({ ok: true, role: account.role }, 200, { "set-cookie": await accountSessionCookie(account.id, env) });
+  try {
+    await issueVerificationCode(env, account, "activate");
+  } catch {
+    return errorResponse("We couldn’t send your verification code. Please try again.", 503);
+  }
+  return json({ ok: true, requiresVerification: true, email: account.email, maskedEmail: maskedEmail(account.email) });
 }
 
 async function registerAccount(request: Request, env: Env): Promise<Response> {
@@ -486,9 +605,95 @@ async function registerAccount(request: Request, env: Env): Promise<Response> {
   const record = await newPasswordRecord(password, env.AUTH_SECRET);
   const now = new Date().toISOString();
   await env.DB.prepare(
-    "INSERT INTO accounts (id, email, full_name, phone, role, driver_type, password_salt, password_hash, password_iterations, status, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'active', ?10)",
+    "INSERT INTO accounts (id, email, full_name, phone, role, driver_type, password_salt, password_hash, password_iterations, status, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', ?10)",
   ).bind(accountId, email, fullName.trim(), phone.trim(), role, role === "driver" ? driverType : null, record.salt, record.hash, record.iterations, now).run();
-  return json({ ok: true, role }, 201, { "set-cookie": await accountSessionCookie(accountId, env) });
+  const account = await env.DB.prepare("SELECT * FROM accounts WHERE id = ?1 LIMIT 1").bind(accountId).first<AccountRow>();
+  if (!account) return errorResponse("Unable to create account.", 500);
+  try {
+    await issueVerificationCode(env, account, "activate");
+  } catch {
+    await env.DB.prepare("DELETE FROM accounts WHERE id = ?1 AND status = 'pending'").bind(accountId).run();
+    return errorResponse("We couldn’t send your verification code. Please try again.", 503);
+  }
+  return json({ ok: true, requiresVerification: true, email, maskedEmail: maskedEmail(email) }, 201);
+}
+
+async function verifyAccountEmail(request: Request, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const code = typeof body?.code === "string" ? body.code.trim() : "";
+  if (!/^\d{5}$/u.test(code)) return errorResponse("Enter the five-digit code from your email.", 400);
+  const account = await env.DB.prepare("SELECT * FROM accounts WHERE email = ?1 AND status = 'pending' LIMIT 1").bind(email).first<AccountRow>();
+  if (!account || !(await consumeVerificationCode(env, account, "activate", code))) {
+    return errorResponse("That code is incorrect or has expired.", 400);
+  }
+  const now = new Date().toISOString();
+  await env.DB.prepare("UPDATE accounts SET status = 'active', updated_at = ?1 WHERE id = ?2 AND status = 'pending'").bind(now, account.id).run();
+  try {
+    await sendEmail(env, {
+      to: account.email,
+      subject: "Welcome to Worldwide Cargo Express",
+      html: emailShell("Your account is ready", `Hi ${account.full_name.split(/\s+/u)[0] || "there"}, your Worldwide Cargo Express account is verified and ready to use.`),
+      text: `Your account is ready\n\nHi ${account.full_name.split(/\s+/u)[0] || "there"}, your Worldwide Cargo Express account is verified and ready to use.`,
+    });
+  } catch {
+    // Verification succeeds even if the non-essential welcome email is delayed.
+  }
+  return json({ ok: true, role: account.role }, 200, { "set-cookie": await accountSessionCookie(account.id, env) });
+}
+
+async function resendAccountCode(request: Request, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const account = await env.DB.prepare("SELECT * FROM accounts WHERE email = ?1 AND status = 'pending' LIMIT 1").bind(email).first<AccountRow>();
+  if (!account) return errorResponse("Account verification is no longer pending.", 400);
+  try {
+    await issueVerificationCode(env, account, "activate", true);
+    return json({ ok: true, maskedEmail: maskedEmail(account.email) });
+  } catch (caught) {
+    const message = caught instanceof Error && caught.message.startsWith("Please wait") ? caught.message : "We couldn’t send another code. Please try again.";
+    return errorResponse(message, caught instanceof Error && caught.message.startsWith("Please wait") ? 429 : 503);
+  }
+}
+
+async function requestPasswordReset(request: Request, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const account = await env.DB.prepare("SELECT * FROM accounts WHERE email = ?1 AND status = 'active' LIMIT 1").bind(email).first<AccountRow>();
+  if (account) {
+    try { await issueVerificationCode(env, account, "reset", true); } catch {
+      console.error(JSON.stringify({ message: "password reset email was not sent", accountId: account.id }));
+    }
+  }
+  return json({ ok: true, message: "If that email has an account, a five-digit reset code is on the way." });
+}
+
+async function resetPassword(request: Request, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const code = typeof body?.code === "string" ? body.code.trim() : "";
+  const password = body?.password;
+  const confirmPassword = body?.confirmPassword;
+  if (!/^\d{5}$/u.test(code)) return errorResponse("Enter the five-digit code from your email.", 400);
+  if (typeof password !== "string" || typeof confirmPassword !== "string" || password !== confirmPassword) return errorResponse("Passwords do not match.", 400);
+  if (!validPassword(password)) return errorResponse("Use a password between 10 and 128 characters.", 400);
+  const account = await env.DB.prepare("SELECT * FROM accounts WHERE email = ?1 AND status = 'active' LIMIT 1").bind(email).first<AccountRow>();
+  if (!account || !(await consumeVerificationCode(env, account, "reset", code))) return errorResponse("That code is incorrect or has expired.", 400);
+  const record = await newPasswordRecord(password, env.AUTH_SECRET);
+  await env.DB.prepare(
+    "UPDATE accounts SET password_salt = ?1, password_hash = ?2, password_iterations = ?3, updated_at = ?4 WHERE id = ?5",
+  ).bind(record.salt, record.hash, record.iterations, new Date().toISOString(), account.id).run();
+  try {
+    await sendEmail(env, {
+      to: account.email,
+      subject: "Your Worldwide Cargo Express password was changed",
+      html: emailShell("Password changed", "Your account password was changed successfully. If you did not make this change, contact Worldwide Cargo Express immediately."),
+      text: "Password changed\n\nYour account password was changed successfully. If you did not make this change, contact Worldwide Cargo Express immediately.",
+    });
+  } catch {
+    // Password reset is complete even if the confirmation email is delayed.
+  }
+  return json({ ok: true });
 }
 
 async function accountLogin(request: Request, env: Env): Promise<Response> {
@@ -687,9 +892,27 @@ async function deleteAccount(request: Request, env: Env, accountId: string): Pro
   return json({ ok: true });
 }
 
+async function deleteApplication(request: Request, env: Env, applicationId: string): Promise<Response> {
+  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const application = await env.DB.prepare("SELECT id, cdl_document_uploaded_at FROM applications WHERE id = ?1 LIMIT 1")
+    .bind(applicationId).first<{ id: string; cdl_document_uploaded_at: string | null }>();
+  if (!application) return errorResponse("Application not found.", 404);
+  await env.DB.prepare("DELETE FROM applications WHERE id = ?1").bind(applicationId).run();
+  if (application.cdl_document_uploaded_at) {
+    try { await env.DRIVER_DOCUMENTS.delete(`applications/${applicationId}/cdl`); } catch {
+      console.error(JSON.stringify({ message: "deleted application left an orphaned CDL object", applicationId }));
+    }
+  }
+  return json({ ok: true });
+}
+
 async function handleApi(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
+
+  if (request.method === "GET" && path === "/api/config") {
+    return json({ ok: true, turnstileSiteKey: env.TURNSTILE_SITE_KEY });
+  }
 
   if (request.method === "POST" && path === "/api/applications") return createApplication(request, env);
   const cdlUploadMatch = path.match(/^\/api\/applications\/([0-9a-f-]{36})\/documents\/cdl$/u);
@@ -709,6 +932,10 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
 
   if (request.method === "POST" && path === "/api/account/activate") return activateAccount(request, env);
   if (request.method === "POST" && path === "/api/account/register") return registerAccount(request, env);
+  if (request.method === "POST" && path === "/api/account/verify-email") return verifyAccountEmail(request, env);
+  if (request.method === "POST" && path === "/api/account/resend-code") return resendAccountCode(request, env);
+  if (request.method === "POST" && path === "/api/account/request-password-reset") return requestPasswordReset(request, env);
+  if (request.method === "POST" && path === "/api/account/reset-password") return resetPassword(request, env);
   if (request.method === "POST" && path === "/api/account/login") return accountLogin(request, env);
   if (request.method === "GET" && path === "/api/account/me") return accountDashboard(request, env);
   const offerMatch = path.match(/^\/api\/account\/offers\/([0-9a-f-]{36})$/u);
@@ -724,6 +951,8 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET" && path === "/api/admin/applications") return listApplications(request, env);
   const adminAccountMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]{36})$/u);
   if (adminAccountMatch && request.method === "DELETE") return deleteAccount(request, env, adminAccountMatch[1]);
+  const adminApplicationMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})$/u);
+  if (adminApplicationMatch && request.method === "DELETE") return deleteApplication(request, env, adminApplicationMatch[1]);
   const cdlDownloadMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/documents\/cdl$/u);
   if (cdlDownloadMatch && request.method === "GET") return downloadCdl(request, env, cdlDownloadMatch[1]);
   if (request.method === "GET" && path === "/api/admin/quotes") return adminQuotes(request, env);

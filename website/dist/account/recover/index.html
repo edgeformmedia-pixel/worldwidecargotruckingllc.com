@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Reset Password | Worldwide Cargo Express</title>
+  <link rel="stylesheet" href="../../account/account.css">
+  <script src="../../api-client.js"></script>
+  <script src="../../account/recover/recover.js" defer></script>
+</head>
+<body>
+  <div class="topline"></div>
+  <header><a href="../../"><img src="../../assets/worldwide-cargo-express-logo-transparent.png" alt="Worldwide Cargo Express LLC"></a><nav><a href="../../account/index.html">Sign in</a></nav></header>
+  <main>
+    <section class="card login">
+      <div id="requestView"><p class="eyebrow">Account recovery</p><h1>Reset password</h1><p>Enter your account email and we’ll send a five-digit reset code.</p><form id="requestForm"><label>Email<input id="recoveryEmail" type="email" autocomplete="email" required></label><p class="error" id="requestError" role="alert"></p><button class="primary" type="submit">Send reset code</button></form></div>
+      <div id="resetView" hidden><p class="eyebrow">Check your inbox</p><h1>Choose a new password</h1><p id="resetMessage"></p><form id="resetForm"><label>Five-digit code<input class="code-input" id="resetCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{5}" maxlength="5" required></label><label>New password<input id="resetPassword" type="password" autocomplete="new-password" minlength="10" maxlength="128" required></label><label>Confirm new password<input id="resetConfirmPassword" type="password" autocomplete="new-password" minlength="10" maxlength="128" required></label><p class="error" id="resetError" role="alert"></p><button class="primary" type="submit">Update password</button></form><button class="text-button" id="requestAnother" type="button">Send another code</button></div>
+      <div id="doneView" hidden><p class="eyebrow">Password updated</p><h1>You’re all set.</h1><p>Your password has been changed. You can now sign in.</p><a class="primary action-link" href="../../account/index.html">Return to sign in</a></div>
+    </section>
+  </main>
+</body>
+</html>

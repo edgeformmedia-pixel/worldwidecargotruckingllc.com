@@ -10,6 +10,9 @@
     submitted: false,
     answers: {},
   };
+  let captchaToken = "";
+  let captchaWidgetId = null;
+  let turnstileSiteKey = "";
 
   const ui = {
     card: document.querySelector("#questionCard"),
@@ -32,7 +35,13 @@
     existingAccountLink: document.querySelector("#existingAccountLink"),
     newPassword: document.querySelector("#newPassword"),
     confirmPassword: document.querySelector("#confirmPassword"),
+    verification: document.querySelector("#applicationVerification"),
   };
+
+  const verification = window.WCXEmailVerification.setup({
+    container: ui.verification,
+    onVerified: async () => { window.location.assign("../account/index.html"); },
+  });
 
   const choices = {
     driverType: [
@@ -297,8 +306,37 @@
       item.append(heading, answer); review.append(item);
     }
     ui.answer.append(review);
+    const captcha = document.createElement("div");
+    captcha.className = "captcha-wrap";
+    captcha.innerHTML = '<p class="input-note">Complete this security check before submitting.</p>';
+    const widget = document.createElement("div");
+    captcha.append(widget);
+    ui.answer.append(captcha);
+    renderCaptcha(widget);
     ui.next.textContent = "Submit application";
     ui.next.hidden = false;
+  }
+
+  async function renderCaptcha(container) {
+    try {
+      if (!turnstileSiteKey) {
+        const response = await fetch("/api/config", { cache: "force-cache" });
+        const data = await response.json();
+        if (!response.ok || !data.turnstileSiteKey) throw new Error();
+        turnstileSiteKey = data.turnstileSiteKey;
+      }
+      for (let attempt = 0; attempt < 50 && !window.turnstile; attempt += 1) await new Promise((resolve) => window.setTimeout(resolve, 100));
+      if (!window.turnstile || !container.isConnected) throw new Error();
+      captchaWidgetId = window.turnstile.render(container, {
+        sitekey: turnstileSiteKey,
+        theme: "light",
+        callback: (token) => { captchaToken = token; ui.error.textContent = ""; },
+        "expired-callback": () => { captchaToken = ""; },
+        "error-callback": () => { captchaToken = ""; },
+      });
+    } catch {
+      ui.error.textContent = "The security check could not load. Refresh the page and try again.";
+    }
   }
 
   function validate(step) {
@@ -315,13 +353,14 @@
   }
 
   async function submitFinal() {
+    if (!captchaToken) throw new Error("Please complete the CAPTCHA before submitting.");
     ui.next.disabled = true;
     ui.next.textContent = "Submitting…";
     await saveChain.catch(() => undefined);
     const response = await fetch(`/api/applications/${state.id}/submit`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ editToken: state.editToken }),
+      body: JSON.stringify({ editToken: state.editToken, captchaToken }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Unable to submit your application.");
@@ -338,6 +377,11 @@
   }
 
   function render() {
+    if (captchaWidgetId !== null && window.turnstile) {
+      try { window.turnstile.remove(captchaWidgetId); } catch { /* Widget was already removed. */ }
+    }
+    captchaWidgetId = null;
+    captchaToken = "";
     ui.answer.replaceChildren();
     ui.error.textContent = "";
     ui.next.disabled = false;
@@ -365,7 +409,13 @@
     ui.error.textContent = "";
     const step = steps()[state.step];
     if (step.type === "review") {
-      try { await submitFinal(); } catch (error) { ui.error.textContent = error.message; ui.next.disabled = false; ui.next.textContent = "Submit application"; }
+      try { await submitFinal(); } catch (error) {
+        ui.error.textContent = error.message;
+        ui.next.disabled = false;
+        ui.next.textContent = "Submit application";
+        captchaToken = "";
+        if (captchaWidgetId !== null && window.turnstile) window.turnstile.reset(captchaWidgetId);
+      }
       return;
     }
     const validationError = validate(step);
@@ -398,7 +448,9 @@
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to activate your account.");
-      window.location.assign("../account/index.html");
+      ui.accountForm.hidden = true;
+      ui.accountIntro.textContent = "Check your email to finish activating your account.";
+      verification.show(data);
     } catch (error) {
       ui.accountError.textContent = error.message;
       button.disabled = false;

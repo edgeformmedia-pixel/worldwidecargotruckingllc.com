@@ -10,6 +10,8 @@
   const mcField = document.querySelector("#mcField");
   const accountForm = document.querySelector("#quoteAccountForm");
   const accountError = document.querySelector("#quoteAccountError");
+  const verificationPanel = document.querySelector("#quoteVerification");
+  const verification = window.WCXEmailVerification.setup({ container: verificationPanel, onVerified: async () => { window.location.assign("../account/index.html"); } });
   let saveChain = Promise.resolve();
 
   function persist() { localStorage.setItem(KEY, JSON.stringify(state)); }
@@ -32,6 +34,7 @@
   }
   document.querySelectorAll("[data-role]").forEach((button) => button.addEventListener("click", async () => {
     roleError.textContent = ""; button.disabled = true;
+    if (button.dataset.role === "driver") { window.location.assign("../apply/index.html"); return; }
     try { await begin(button.dataset.role); } catch (error) { roleError.textContent = error.message; button.disabled = false; }
   }));
   form.querySelectorAll("[data-field]").forEach((field) => {
@@ -59,7 +62,10 @@
     event.preventDefault(); accountError.textContent = ""; const button = accountForm.querySelector("button"); button.disabled = true;
     try {
       const response = await fetch("/api/account/activate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ source: "quote", sourceId: state.id, editToken: state.editToken, password: document.querySelector("#quotePassword").value, confirmPassword: document.querySelector("#quoteConfirmPassword").value }) });
-      const data = await response.json(); if (!response.ok) throw new Error(data.error || "Unable to activate account."); window.location.assign("../account/index.html");
+      const data = await response.json(); if (!response.ok) throw new Error(data.error || "Unable to activate account.");
+      accountForm.hidden = true;
+      document.querySelector("#quoteAccountIntro").textContent = "Check your email to finish activating your account.";
+      verification.show(data);
     } catch (error) { accountError.textContent = error.message; button.disabled = false; }
   });
   document.querySelectorAll('input[type="date"]').forEach((input) => { input.min = new Date().toISOString().slice(0, 10); });
