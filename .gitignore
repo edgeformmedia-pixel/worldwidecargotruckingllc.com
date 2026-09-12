@@ -1,0 +1,11 @@
+# Local dependencies and tooling state
+node_modules/
+.wrangler/
+.dev.vars
+worker-configuration.d.ts
+
+# Temporary work and exported archives
+tmp/
+output/
+sora-studio-local/
+*.zip
