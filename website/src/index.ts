@@ -109,6 +109,12 @@ const YES_NO_VALUES = new Set(["yes", "no"]);
 const START_VALUES = new Set(["tomorrow", "this_week", "more_than_week"]);
 const CDL_CONTENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 const MAX_CDL_SIZE_BYTES = 5 * 1024 * 1024;
+
+function cdlExtension(contentType: string | undefined): string {
+  if (contentType === "image/png") return "png";
+  if (contentType === "image/jpeg") return "jpg";
+  return "pdf";
+}
 // Cloudflare Workers Web Crypto caps PBKDF2 at 100,000 iterations per operation.
 const PASSWORD_ITERATIONS = 100_000;
 const ACCOUNT_ROLES = new Set(["driver", "broker", "shipper"]);
@@ -159,7 +165,7 @@ function corsHeaders(origin: string): HeadersInit {
     "access-control-allow-origin": origin,
     "access-control-allow-credentials": "true",
     "access-control-allow-headers": "content-type",
-    "access-control-allow-methods": "GET, POST, PATCH, OPTIONS",
+    "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
     vary: "Origin",
   };
 }
@@ -372,7 +378,7 @@ async function uploadCdl(request: Request, env: Env, id: string): Promise<Respon
   const objectKey = `applications/${id}/cdl`;
   try {
     await env.DRIVER_DOCUMENTS.put(objectKey, file, {
-      httpMetadata: { contentType: file.type, contentDisposition: "attachment; filename=\"cdl-license\"" },
+      httpMetadata: { contentType: file.type, contentDisposition: `attachment; filename=\"cdl-license.${cdlExtension(file.type)}\"` },
     });
     const now = new Date().toISOString();
     await env.DB.prepare(
@@ -392,8 +398,9 @@ async function downloadCdl(request: Request, env: Env, id: string): Promise<Resp
   if (!application?.cdl_document_uploaded_at) return errorResponse("CDL document not found.", 404);
   const object = await env.DRIVER_DOCUMENTS.get(`applications/${id}/cdl`);
   if (!object) return errorResponse("CDL document not found.", 404);
-  const headers = new Headers({ "cache-control": "private, no-store", "content-disposition": "attachment; filename=\"cdl-license\"" });
+  const headers = new Headers({ "cache-control": "private, no-store" });
   object.writeHttpMetadata(headers);
+  headers.set("content-disposition", `attachment; filename=\"cdl-license.${cdlExtension(object.httpMetadata?.contentType)}\"`);
   return new Response(object.body, { headers });
 }
 
@@ -657,13 +664,27 @@ async function listApplications(request: Request, env: Env): Promise<Response> {
   const allowedStatus = status === "draft" || status === "submitted" ? status : null;
   const statement = allowedStatus
     ? env.DB.prepare(
-      "SELECT id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
     ).bind(allowedStatus)
     : env.DB.prepare(
-      "SELECT id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
     );
   const result = await statement.all<ApplicationRow>();
   return json({ ok: true, applications: result.results });
+}
+
+async function deleteAccount(request: Request, env: Env, accountId: string): Promise<Response> {
+  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const account = await env.DB.prepare("SELECT id FROM accounts WHERE id = ?1 LIMIT 1").bind(accountId).first<{ id: string }>();
+  if (!account) return errorResponse("Account not found.", 404);
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM driver_offers WHERE driver_account_id = ?1").bind(accountId),
+    env.DB.prepare("UPDATE applications SET account_id = NULL, updated_at = ?2 WHERE account_id = ?1").bind(accountId, now),
+    env.DB.prepare("UPDATE quotes SET account_id = NULL, updated_at = ?2 WHERE account_id = ?1").bind(accountId, now),
+    env.DB.prepare("DELETE FROM accounts WHERE id = ?1").bind(accountId),
+  ]);
+  return json({ ok: true });
 }
 
 async function handleApi(request: Request, env: Env): Promise<Response> {
@@ -701,6 +722,8 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     return (await hasAdminSession(request, env)) ? json({ ok: true }) : errorResponse("Unauthorized.", 401);
   }
   if (request.method === "GET" && path === "/api/admin/applications") return listApplications(request, env);
+  const adminAccountMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]{36})$/u);
+  if (adminAccountMatch && request.method === "DELETE") return deleteAccount(request, env, adminAccountMatch[1]);
   const cdlDownloadMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/documents\/cdl$/u);
   if (cdlDownloadMatch && request.method === "GET") return downloadCdl(request, env, cdlDownloadMatch[1]);
   if (request.method === "GET" && path === "/api/admin/quotes") return adminQuotes(request, env);
