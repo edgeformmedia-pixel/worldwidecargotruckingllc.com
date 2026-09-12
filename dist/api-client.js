@@ -3,6 +3,7 @@
 
   // GitHub Pages serves the public files. Cloudflare serves requests to /api.
   const apiOrigin = "https://worldwide-cargo-express.edgeformmedia.workers.dev";
+  window.WCX_API_ORIGIN = apiOrigin;
   const nativeFetch = window.fetch.bind(window);
 
   window.fetch = (input, init = {}) => {

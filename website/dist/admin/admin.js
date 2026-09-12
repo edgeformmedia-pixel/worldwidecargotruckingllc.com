@@ -71,7 +71,7 @@
     card.append(actions); return card;
   }
 
-  function documentLink(app, kind, label) { const link = element("a", "", label); link.href = `/api/admin/applications/${app.id}/documents/${kind}`; link.target = "_blank"; link.rel = "noopener"; return link; }
+  function documentLink(app, kind, label) { const link = element("a", "", label); link.href = `${window.WCX_API_ORIGIN || ""}/api/admin/applications/${app.id}/documents/${kind}`; link.target = "_blank"; link.rel = "noopener"; return link; }
 
   function filteredApplications(archived) {
     const search = ui.driverSearch.value.trim().toLowerCase(), type = ui.driverTypeFilter.value, doc = ui.documentFilter.value;
