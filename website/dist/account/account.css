@@ -3,3 +3,5 @@
 .verification>p{color:var(--muted);line-height:1.6}.code-input{font-size:1.45rem;letter-spacing:.28em;text-align:center}.text-button{margin-top:18px;padding:0;border:0;background:none;color:var(--navy);font-weight:800;cursor:pointer}.text-button:disabled{opacity:.55;cursor:wait}
 
 .action-link{display:inline-grid;margin-top:22px;padding:0 22px;place-items:center;text-decoration:none}.text-button+*{margin-top:18px}
+
+.login>div>p:not(.eyebrow){color:var(--muted);line-height:1.6}
