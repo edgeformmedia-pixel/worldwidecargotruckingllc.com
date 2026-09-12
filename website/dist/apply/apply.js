@@ -202,6 +202,11 @@
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.required = true;
+    checkbox.checked = state.answers.cdl_consent === "yes";
+    checkbox.addEventListener("change", () => {
+      state.answers.cdl_consent = checkbox.checked ? "yes" : "";
+      persist();
+    });
     const copy = document.createElement("span");
     copy.textContent = "I agree to the secure processing of my CDL solely to evaluate my driver application.";
     consent.append(checkbox, copy);
@@ -299,6 +304,7 @@
   function validate(step) {
     const value = String(state.answers[step.field] || "").trim();
     if (!value) return "Please answer this question to continue.";
+    if (step.field === "cdl_upload" && value === "yes" && state.answers.cdl_consent !== "yes") return "Please check the consent box to continue, or choose No.";
     if (step.field === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value)) return "Enter a valid email address.";
     if (step.field === "phone" && value.replace(/\D/g, "").length < 10) return "Enter a valid phone number with area code.";
     if (step.field === "truck_year") {
