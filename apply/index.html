@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Apply to drive with Worldwide Cargo Express LLC.">
+  <title>Driver Application | Worldwide Cargo Express</title>
+  <link rel="stylesheet" href="/worldwidecargotruckingllc.com/apply/apply.css">
+  <link rel="stylesheet" href="/worldwidecargotruckingllc.com/apply/layout.css">
+  <script src="/worldwidecargotruckingllc.com/api-client.js"></script>
+  <script src="/worldwidecargotruckingllc.com/apply/apply.js" defer></script>
+</head>
+<body>
+  <div class="topline"></div>
+  <header class="site-header">
+    <a href="/worldwidecargotruckingllc.com/" aria-label="Worldwide Cargo Express home">
+      <img src="/worldwidecargotruckingllc.com/assets/worldwide-cargo-express-logo-transparent.png" alt="Worldwide Cargo Express LLC">
+    </a>
+    <span>Driver application</span>
+  </header>
+
+  <main>
+    <aside class="story-panel">
+      <div class="story-copy">
+        <p class="eyebrow">Join the team</p>
+        <h1>Your next mile starts here.</h1>
+        <p>Tell us a little about yourself. Your progress is saved securely as you go, so you can leave and come back on this device.</p>
+      </div>
+      <div class="support">Questions? Call <a href="tel:+16303810174">630 381 0174</a></div>
+    </aside>
+
+    <section class="form-panel" aria-live="polite">
+      <div class="progress-wrap" id="progressWrap" hidden>
+        <div class="progress-label"><span id="progressText">Application</span><span id="saveStatus">Saved</span></div>
+        <div class="progress-track"><span id="progressBar"></span></div>
+      </div>
+
+      <div class="question-card" id="questionCard">
+        <button class="back" id="backButton" type="button" hidden aria-label="Go back">← Back</button>
+        <p class="step-label" id="stepLabel">First, choose the opportunity that fits you.</p>
+        <h2 id="questionTitle">Are you an owner-operator or a company driver?</h2>
+        <p class="question-help" id="questionHelp">We’ll tailor the next few questions to your selection.</p>
+        <form id="questionForm" novalidate>
+          <div id="answerArea" class="answer-area"></div>
+          <p class="error" id="formError" role="alert"></p>
+          <button class="continue" id="continueButton" type="submit" hidden>Continue <span>→</span></button>
+        </form>
+      </div>
+
+      <div class="completion" id="completion" hidden>
+        <div class="checkmark">✓</div>
+        <p class="step-label">Application received</p>
+        <h2>Thanks for applying.</h2>
+        <p id="accountIntro">Your driver account has been created. Choose a password to track your application and any load offers.</p>
+        <form id="activateAccountForm" class="account-form">
+          <label for="newPassword">Password</label>
+          <input class="text-input" id="newPassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" required>
+          <label for="confirmPassword">Confirm password</label>
+          <input class="text-input" id="confirmPassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" required>
+          <p class="input-note">Use at least 10 characters.</p>
+          <p class="error" id="accountError" role="alert"></p>
+          <button class="continue" type="submit">Activate account →</button>
+        </form>
+        <a id="existingAccountLink" href="/worldwidecargotruckingllc.com/account/index.html" hidden>Sign in to your existing account</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
