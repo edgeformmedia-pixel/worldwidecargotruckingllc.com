@@ -1,0 +1,48 @@
+name: Deploy website to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/dist/**"
+      - ".github/workflows/deploy-github-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the site
+        uses: actions/checkout@v4
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Prepare the project-site paths
+        run: |
+          mkdir .pages-site
+          cp -R website/dist/. .pages-site/
+          find .pages-site -name '*.html' -exec sed -i \
+            -e 's#href="/#href="/worldwidecargotruckingllc.com/#g' \
+            -e 's#src="/#src="/worldwidecargotruckingllc.com/#g' \
+            -e 's#poster="/#poster="/worldwidecargotruckingllc.com/#g' {} +
+          find .pages-site -name '*.js' -exec sed -i \
+            -e 's#"/assets/#"/worldwidecargotruckingllc.com/assets/#g' \
+            -e 's#"/account/#"/worldwidecargotruckingllc.com/account/#g' {} +
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .pages-site
+      - name: Publish site
+        id: deployment
+        uses: actions/deploy-pages@v4

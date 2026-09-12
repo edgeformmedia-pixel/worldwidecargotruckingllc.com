@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Applications Admin | Worldwide Cargo Express</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+  <link rel="stylesheet" href="/admin/matching.css">
+  <script src="/api-client.js"></script>
+  <script src="/admin/admin.js" defer></script>
+</head>
+<body>
+  <div class="topline"></div>
+  <header>
+    <a href="/"><img src="/assets/worldwide-cargo-express-logo-transparent.png" alt="Worldwide Cargo Express LLC"></a>
+    <div><span>Applications admin</span><button id="logoutButton" type="button" hidden>Log out</button></div>
+  </header>
+
+  <main>
+    <section class="login-card" id="loginView">
+      <p class="eyebrow">Secure access</p>
+      <h1>Admin login</h1>
+      <p>Enter the administrator password to view submitted applications and in-progress drafts.</p>
+      <form id="loginForm">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+        <p class="error" id="loginError" role="alert"></p>
+        <button type="submit">Log in</button>
+      </form>
+    </section>
+
+    <section class="dashboard" id="dashboard" hidden>
+      <div class="dashboard-head">
+        <div><p class="eyebrow">Recruiting pipeline</p><h1>Driver applications</h1><p id="lastUpdated">Loading…</p></div>
+        <button class="refresh" id="refreshButton" type="button">Refresh</button>
+      </div>
+      <div class="stats">
+        <article><span>Total</span><strong id="totalCount">0</strong></article>
+        <article><span>Submitted</span><strong id="submittedCount">0</strong></article>
+        <article><span>In progress</span><strong id="draftCount">0</strong></article>
+        <article><span>Owner-operators</span><strong id="ownerCount">0</strong></article>
+      </div>
+      <div class="toolbar">
+        <div class="filters" id="filters">
+          <button class="active" type="button" data-filter="all">All</button>
+          <button type="button" data-filter="submitted">Submitted</button>
+          <button type="button" data-filter="draft">In progress</button>
+        </div>
+        <label class="search"><span>Search</span><input id="searchInput" type="search" placeholder="Name, email, or phone"></label>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Status</th><th>Applicant</th><th>Type</th><th>Experience</th><th>Role details</th><th>Last activity</th></tr></thead>
+          <tbody id="applicationsBody"></tbody>
+        </table>
+        <div class="empty" id="emptyState" hidden>No applications match this view.</div>
+      </div>
+      <section class="matching">
+        <div class="matching-head"><p class="eyebrow">Dispatch workspace</p><h2>Match a quote to a driver</h2><p>Choose a submitted quote, select a driver, and send the offer to their account.</p></div>
+        <form id="offerForm" class="offer-form">
+          <label>Quote<select id="quoteSelect" required><option value="">Choose a quote</option></select></label>
+          <label>Driver<select id="driverSelect" required><option value="">Choose a driver</option></select></label>
+          <label>Offer amount (optional)<input id="offerRate" inputmode="decimal" placeholder="2,500.00"></label>
+          <label class="notes">Notes for driver<textarea id="offerNotes" maxlength="1000" placeholder="Pickup instructions, schedule, or other details"></textarea></label>
+          <p class="error" id="offerError" role="alert"></p><button type="submit">Send driver offer</button>
+        </form>
+        <div class="matching-grid"><div><h3>Submitted quotes</h3><div class="match-list" id="quoteList"></div></div><div><h3>Recent driver offers</h3><div class="match-list" id="offerList"></div></div></div>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

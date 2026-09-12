@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Request a freight quote from Worldwide Cargo Express LLC.">
+  <title>Request a Freight Quote | Worldwide Cargo Express</title>
+  <link rel="stylesheet" href="/quote/quote.css">
+  <script src="/api-client.js"></script>
+  <script src="/quote/quote.js" defer></script>
+</head>
+<body>
+  <div class="topline"></div>
+  <header><a href="/"><img src="/assets/worldwide-cargo-express-logo-transparent.png" alt="Worldwide Cargo Express LLC"></a><nav><a href="/account/index.html">Account</a><a href="/apply/index.html">Drive with us</a></nav></header>
+  <main>
+    <section class="intro"><p class="eyebrow">Freight solutions</p><h1>Request a quote.</h1><p>Share the details of your load and our team will review the lane, timing, equipment, and operating requirements.</p></section>
+
+    <section class="role-card" id="roleCard">
+      <p class="eyebrow">Before we begin</p><h2>What best describes you?</h2>
+      <div class="role-grid"><button type="button" data-role="broker"><strong>Freight broker</strong><span>I’m arranging transportation for a customer</span></button><button type="button" data-role="shipper"><strong>Direct shipper</strong><span>I’m shipping my company’s freight</span></button></div>
+      <p class="error" id="roleError"></p>
+    </section>
+
+    <form id="quoteForm" hidden novalidate>
+      <section class="form-section"><div class="section-number">01</div><div><h2>Contact</h2><p>Who should we contact about this load?</p></div>
+        <div class="fields">
+          <label>Full name<input data-field="full_name" autocomplete="name" required></label>
+          <label>Company name<input data-field="company_name" autocomplete="organization" required></label>
+          <label>Email<input data-field="email" type="email" autocomplete="email" required></label>
+          <label>Phone<input data-field="phone" type="tel" autocomplete="tel" required></label>
+          <label id="mcField">MC number<input data-field="mc_number" placeholder="MC-123456"></label>
+          <label>Load / reference number <small>Optional</small><input data-field="reference_number"></label>
+        </div>
+      </section>
+
+      <section class="form-section"><div class="section-number">02</div><div><h2>Pickup</h2><p>Where and when is the freight available?</p></div>
+        <div class="fields">
+          <label>Pickup city<input data-field="pickup_city" required></label><label>State<input data-field="pickup_state" maxlength="40" required></label><label>ZIP code<input data-field="pickup_zip" inputmode="numeric" required></label>
+          <label>Pickup date<input data-field="pickup_date" type="date" required></label><label>Pickup window <small>Optional</small><input data-field="pickup_window" placeholder="8:00 AM – 3:00 PM"></label>
+          <label>Appointment required?<select data-field="pickup_appointment"><option value="">Choose</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label>Facility type<select data-field="pickup_facility"><option value="">Choose</option><option>Warehouse</option><option>Business</option><option>Residence</option><option>Port</option><option>Military base</option><option>Job site</option><option>Other</option></select></label>
+        </div>
+      </section>
+
+      <section class="form-section"><div class="section-number">03</div><div><h2>Delivery</h2><p>Where and when does it need to arrive?</p></div>
+        <div class="fields">
+          <label>Delivery city<input data-field="delivery_city" required></label><label>State<input data-field="delivery_state" maxlength="40" required></label><label>ZIP code<input data-field="delivery_zip" inputmode="numeric" required></label>
+          <label>Delivery date<input data-field="delivery_date" type="date" required></label><label>Delivery window <small>Optional</small><input data-field="delivery_window" placeholder="8:00 AM – 3:00 PM"></label>
+          <label>Appointment required?<select data-field="delivery_appointment"><option value="">Choose</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label>Facility type<select data-field="delivery_facility"><option value="">Choose</option><option>Warehouse</option><option>Business</option><option>Residence</option><option>Port</option><option>Military base</option><option>Job site</option><option>Other</option></select></label>
+        </div>
+      </section>
+
+      <section class="form-section"><div class="section-number">04</div><div><h2>Freight</h2><p>Tell us what is moving and the equipment required.</p></div>
+        <div class="fields">
+          <label>Equipment<select data-field="equipment" required><option value="">Choose</option><option value="dry_van_53">53′ dry van</option><option value="box_truck">Box / straight truck</option><option value="power_only">Power only</option><option value="other">Other</option><option value="not_sure">Not sure</option></select></label>
+          <label>Commodity<input data-field="commodity" placeholder="What is being shipped?" required></label>
+          <label>Total weight (lbs)<input data-field="total_weight" inputmode="numeric" required></label><label>Pieces or pallets<input data-field="piece_count" inputmode="numeric" required></label>
+          <label>Dimensions / linear feet <small>Optional</small><input data-field="dimensions" placeholder="L × W × H or linear feet"></label>
+          <label>Stackable?<select data-field="stackable"><option value="">Choose</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label>Hazardous material?<select data-field="hazmat"><option value="">Choose</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label>Temperature controlled?<select data-field="temperature_control"><option value="">Choose</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label>Temperature range <small>If applicable</small><input data-field="temperature_range"></label>
+          <label>Load type<select data-field="load_type"><option value="">Choose</option><option value="live">Live load/unload</option><option value="drop_hook">Drop-and-hook</option><option value="either">Either</option></select></label>
+          <label class="wide">Special services <small>Optional — liftgate, driver assist, limited access, team or expedited</small><input data-field="special_services"></label>
+          <label class="wide">Additional notes <small>Optional</small><textarea data-field="notes" rows="4"></textarea></label>
+        </div>
+      </section>
+      <section class="submit-section"><p>Submitting this form requests a quote. It is not a booking, rate confirmation, or guarantee of capacity.</p><p class="error" id="quoteError"></p><button type="submit">Submit quote request →</button></section>
+    </form>
+
+    <section class="success" id="quoteSuccess" hidden><div class="check">✓</div><p class="eyebrow">Quote received</p><h2>Your request is in.</h2><p id="quoteAccountIntro">Your customer account has been created. Choose a password to track this quote and future requests.</p>
+      <form id="quoteAccountForm"><label>Password<input id="quotePassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" required></label><label>Confirm password<input id="quoteConfirmPassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" required></label><p class="hint">Use at least 10 characters.</p><p class="error" id="quoteAccountError"></p><button type="submit">Activate account →</button></form>
+      <a id="quoteExistingLink" href="/account/index.html" hidden>Sign in to your existing account</a>
+    </section>
+  </main>
+</body>
+</html>
