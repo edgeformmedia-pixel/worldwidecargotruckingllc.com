@@ -1,0 +1,33 @@
+(() => {
+  "use strict";
+  const form = document.querySelector("#createForm");
+  const createView = document.querySelector("#createView");
+  const role = document.querySelector("#role");
+  const driverType = document.querySelector("#driverType");
+  const driverWrap = document.querySelector("#driverTypeWrap");
+  const error = document.querySelector("#error");
+  const verification = window.WCXEmailVerification.setup({
+    container: document.querySelector("#createVerification"),
+    onVerified: async () => { window.location.assign("../../account/index.html"); },
+  });
+  role.addEventListener("change", () => {
+    const isDriver = role.value === "driver";
+    driverWrap.hidden = !isDriver;
+    driverType.required = isDriver;
+    if (!isDriver) driverType.value = "";
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.textContent = "";
+    if (document.querySelector("#password").value !== document.querySelector("#confirmPassword").value) { error.textContent = "Passwords do not match."; return; }
+    const button = form.querySelector("button");
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/account/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: role.value, driverType: driverType.value, fullName: document.querySelector("#fullName").value, email: document.querySelector("#email").value, phone: document.querySelector("#phone").value, password: document.querySelector("#password").value, confirmPassword: document.querySelector("#confirmPassword").value }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to create account.");
+      createView.hidden = true;
+      verification.show(data);
+    } catch (caught) { error.textContent = caught.message; button.disabled = false; }
+  });
+})();

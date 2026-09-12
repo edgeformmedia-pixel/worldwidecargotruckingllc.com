@@ -22,6 +22,14 @@ type ApplicationRow = {
   submitted_at: string | null;
   cdl_document_uploaded_at?: string | null;
   cdl_processing_consent_at?: string | null;
+  medical_card_uploaded_at?: string | null;
+  medical_card_expiration?: string | null;
+  recruiting_stage?: "phone_screen" | "docs_requested" | "docs_received";
+  talked_to_at?: string | null;
+  docs_requested_at?: string | null;
+  archived_at?: string | null;
+  sent_to?: string;
+  sent_at?: string | null;
   account_id?: string | null;
   review_status?: "new" | "reviewing" | "approved" | "declined";
 };
@@ -122,6 +130,7 @@ const YES_NO_VALUES = new Set(["yes", "no"]);
 const START_VALUES = new Set(["tomorrow", "this_week", "more_than_week"]);
 const CDL_CONTENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 const MAX_CDL_SIZE_BYTES = 5 * 1024 * 1024;
+const RECRUITING_STAGES = new Set(["phone_screen", "docs_requested", "docs_received"]);
 
 function cdlExtension(contentType: string | undefined): string {
   if (contentType === "image/png") return "png";
@@ -515,6 +524,63 @@ async function downloadCdl(request: Request, env: Env, id: string): Promise<Resp
   return new Response(object.body, { headers });
 }
 
+async function uploadAccountDocument(request: Request, env: Env, id: string, kind: "cdl" | "medical-card"): Promise<Response> {
+  const account = await currentAccount(request, env);
+  if (!account || account.role !== "driver") return errorResponse("Unauthorized.", 401);
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (contentLength > MAX_CDL_SIZE_BYTES + 128_000) return errorResponse("The document must be 5 MB or smaller.", 413);
+  let form: FormData;
+  try { form = await request.formData(); } catch { return errorResponse("Choose a valid document to upload.", 400); }
+  const file = form.get("file");
+  const consent = form.get("consent");
+  const expiration = typeof form.get("expiration") === "string" ? String(form.get("expiration")) : "";
+  if (consent !== "yes" || !(file instanceof File)) return errorResponse("Confirm consent and choose a document.", 400);
+  if (!CDL_CONTENT_TYPES.has(file.type) || file.size === 0 || file.size > MAX_CDL_SIZE_BYTES) {
+    return errorResponse("Upload a JPG, PNG, or PDF up to 5 MB.", 400);
+  }
+  if (kind === "medical-card" && !/^\d{4}-\d{2}-\d{2}$/u.test(expiration)) {
+    return errorResponse("Enter the medical card expiration date.", 400);
+  }
+  const application = await env.DB.prepare(
+    "SELECT id FROM applications WHERE id = ?1 AND account_id = ?2 AND status = 'submitted' LIMIT 1",
+  ).bind(id, account.id).first<{ id: string }>();
+  if (!application) return errorResponse("Application not found.", 404);
+  const extension = cdlExtension(file.type);
+  const filename = kind === "cdl" ? `cdl-license.${extension}` : `medical-card.${extension}`;
+  const now = new Date().toISOString();
+  try {
+    await env.DRIVER_DOCUMENTS.put(`applications/${id}/${kind}`, file, {
+      httpMetadata: { contentType: file.type, contentDisposition: `attachment; filename=\"${filename}\"` },
+    });
+    if (kind === "cdl") {
+      await env.DB.prepare(
+        "UPDATE applications SET cdl_document_uploaded_at = ?1, cdl_processing_consent_at = ?1, updated_at = ?1 WHERE id = ?2 AND account_id = ?3",
+      ).bind(now, id, account.id).run();
+    } else {
+      await env.DB.prepare(
+        "UPDATE applications SET medical_card_uploaded_at = ?1, medical_card_expiration = ?2, updated_at = ?1 WHERE id = ?3 AND account_id = ?4",
+      ).bind(now, expiration, id, account.id).run();
+    }
+    return json({ ok: true, uploadedAt: now });
+  } catch {
+    return errorResponse("We couldn’t upload that document. Please try again.", 500);
+  }
+}
+
+async function downloadMedicalCard(request: Request, env: Env, id: string): Promise<Response> {
+  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const application = await env.DB.prepare(
+    "SELECT medical_card_uploaded_at FROM applications WHERE id = ?1 LIMIT 1",
+  ).bind(id).first<ApplicationRow>();
+  if (!application?.medical_card_uploaded_at) return errorResponse("Medical card not found.", 404);
+  const object = await env.DRIVER_DOCUMENTS.get(`applications/${id}/medical-card`);
+  if (!object) return errorResponse("Medical card not found.", 404);
+  const headers = new Headers({ "cache-control": "private, no-store" });
+  object.writeHttpMetadata(headers);
+  headers.set("content-disposition", `attachment; filename=\"medical-card.${cdlExtension(object.httpMetadata?.contentType)}\"`);
+  return new Response(object.body, { headers });
+}
+
 async function submitApplication(request: Request, env: Env, id: string): Promise<Response> {
   const body = await readJson(request);
   const editToken = body?.editToken;
@@ -713,7 +779,7 @@ async function accountDashboard(request: Request, env: Env): Promise<Response> {
   const account = await currentAccount(request, env);
   if (!account) return errorResponse("Unauthorized.", 401);
   const [applications, quotes, offers] = await env.DB.batch([
-    env.DB.prepare("SELECT id, driver_type, status, review_status, created_at, updated_at, submitted_at FROM applications WHERE account_id = ?1 ORDER BY updated_at DESC LIMIT 50").bind(account.id),
+    env.DB.prepare("SELECT id, driver_type, status, review_status, recruiting_stage, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, created_at, updated_at, submitted_at FROM applications WHERE account_id = ?1 ORDER BY updated_at DESC LIMIT 50").bind(account.id),
     env.DB.prepare("SELECT id, requester_type, pickup_city, pickup_state, delivery_city, delivery_state, equipment, commodity, status, created_at, updated_at, submitted_at FROM quotes WHERE account_id = ?1 ORDER BY updated_at DESC LIMIT 100").bind(account.id),
     env.DB.prepare("SELECT o.id, o.quote_id, o.offered_rate_cents, o.notes, o.status, o.created_at, q.pickup_city, q.pickup_state, q.delivery_city, q.delivery_state, q.equipment, q.commodity FROM driver_offers o JOIN quotes q ON q.id = o.quote_id WHERE o.driver_account_id = ?1 ORDER BY o.updated_at DESC LIMIT 100").bind(account.id),
   ]);
@@ -869,13 +935,51 @@ async function listApplications(request: Request, env: Env): Promise<Response> {
   const allowedStatus = status === "draft" || status === "submitted" ? status : null;
   const statement = allowedStatus
     ? env.DB.prepare(
-      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, archived_at, sent_to, sent_at, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
     ).bind(allowedStatus)
     : env.DB.prepare(
-      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, archived_at, sent_to, sent_at, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
     );
   const result = await statement.all<ApplicationRow>();
   return json({ ok: true, applications: result.results });
+}
+
+async function updateRecruitingApplication(request: Request, env: Env, applicationId: string): Promise<Response> {
+  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const body = await readJson(request);
+  const now = new Date().toISOString();
+  if (body?.archive === true || body?.archive === false) {
+    const archivedAt = body.archive ? now : null;
+    const result = await env.DB.prepare("UPDATE applications SET archived_at = ?1, updated_at = ?2 WHERE id = ?3 AND status = 'submitted'")
+      .bind(archivedAt, now, applicationId).run();
+    if (result.meta.changes !== 1) return errorResponse("Application not found.", 404);
+    return json({ ok: true });
+  }
+  if (typeof body?.stage === "string") {
+    const stage = body.stage;
+    if (!RECRUITING_STAGES.has(stage)) return errorResponse("Invalid recruiting stage.", 400);
+    const application = await env.DB.prepare(
+      "SELECT cdl_document_uploaded_at, medical_card_uploaded_at FROM applications WHERE id = ?1 AND status = 'submitted' LIMIT 1",
+    ).bind(applicationId).first<ApplicationRow>();
+    if (!application) return errorResponse("Application not found.", 404);
+    if (stage === "docs_received" && (!application.cdl_document_uploaded_at || !application.medical_card_uploaded_at)) {
+      return errorResponse("Both the CDL and medical card must be received first.", 400);
+    }
+    await env.DB.prepare(
+      "UPDATE applications SET recruiting_stage = ?1, talked_to_at = CASE WHEN ?1 != 'phone_screen' THEN COALESCE(talked_to_at, ?2) ELSE talked_to_at END, docs_requested_at = CASE WHEN ?1 = 'docs_requested' THEN COALESCE(docs_requested_at, ?2) ELSE docs_requested_at END, updated_at = ?2 WHERE id = ?3",
+    ).bind(stage, now, applicationId).run();
+    return json({ ok: true });
+  }
+  if (typeof body?.sentTo === "string") {
+    const sentTo = body.sentTo.trim();
+    if (!sentTo || sentTo.length > 160) return errorResponse("Enter who received the driver documents.", 400);
+    const result = await env.DB.prepare(
+      "UPDATE applications SET sent_to = ?1, sent_at = ?2, updated_at = ?2 WHERE id = ?3 AND recruiting_stage = 'docs_received' AND archived_at IS NULL",
+    ).bind(sentTo, now, applicationId).run();
+    if (result.meta.changes !== 1) return errorResponse("Ready driver not found.", 404);
+    return json({ ok: true });
+  }
+  return errorResponse("Choose an update.", 400);
 }
 
 async function deleteAccount(request: Request, env: Env, accountId: string): Promise<Response> {
@@ -902,6 +1006,9 @@ async function deleteApplication(request: Request, env: Env, applicationId: stri
     try { await env.DRIVER_DOCUMENTS.delete(`applications/${applicationId}/cdl`); } catch {
       console.error(JSON.stringify({ message: "deleted application left an orphaned CDL object", applicationId }));
     }
+  }
+  try { await env.DRIVER_DOCUMENTS.delete(`applications/${applicationId}/medical-card`); } catch {
+    console.error(JSON.stringify({ message: "deleted application left an orphaned medical card", applicationId }));
   }
   return json({ ok: true });
 }
@@ -938,6 +1045,10 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   if (request.method === "POST" && path === "/api/account/reset-password") return resetPassword(request, env);
   if (request.method === "POST" && path === "/api/account/login") return accountLogin(request, env);
   if (request.method === "GET" && path === "/api/account/me") return accountDashboard(request, env);
+  const accountDocumentMatch = path.match(/^\/api\/account\/applications\/([0-9a-f-]{36})\/documents\/(cdl|medical-card)$/u);
+  if (accountDocumentMatch && request.method === "POST") {
+    return uploadAccountDocument(request, env, accountDocumentMatch[1], accountDocumentMatch[2] as "cdl" | "medical-card");
+  }
   const offerMatch = path.match(/^\/api\/account\/offers\/([0-9a-f-]{36})$/u);
   if (offerMatch && request.method === "PATCH") return updateOfferResponse(request, env, offerMatch[1]);
   if (request.method === "POST" && path === "/api/account/logout") {
@@ -952,9 +1063,12 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   const adminAccountMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]{36})$/u);
   if (adminAccountMatch && request.method === "DELETE") return deleteAccount(request, env, adminAccountMatch[1]);
   const adminApplicationMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})$/u);
+  if (adminApplicationMatch && request.method === "PATCH") return updateRecruitingApplication(request, env, adminApplicationMatch[1]);
   if (adminApplicationMatch && request.method === "DELETE") return deleteApplication(request, env, adminApplicationMatch[1]);
   const cdlDownloadMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/documents\/cdl$/u);
   if (cdlDownloadMatch && request.method === "GET") return downloadCdl(request, env, cdlDownloadMatch[1]);
+  const medicalCardDownloadMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/documents\/medical-card$/u);
+  if (medicalCardDownloadMatch && request.method === "GET") return downloadMedicalCard(request, env, medicalCardDownloadMatch[1]);
   if (request.method === "GET" && path === "/api/admin/quotes") return adminQuotes(request, env);
   if (request.method === "POST" && path === "/api/admin/offers") return createDriverOffer(request, env);
   const adminQuoteMatch = path.match(/^\/api\/admin\/quotes\/([0-9a-f-]{36})$/u);

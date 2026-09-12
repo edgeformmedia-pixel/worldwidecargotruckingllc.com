@@ -1,73 +1,63 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="robots" content="noindex,nofollow">
-  <title>Applications Admin | Worldwide Cargo Express</title>
-  <link rel="stylesheet" href="/admin/admin.css">
-  <link rel="stylesheet" href="/admin/matching.css">
-  <script src="/api-client.js"></script>
-  <script src="/admin/admin.js" defer></script>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
+  <title>Recruiting Admin | Worldwide Cargo Express</title>
+  <link rel="stylesheet" href="../admin/admin.css"><script src="../api-client.js"></script><script src="../admin/admin.js" defer></script>
 </head>
 <body>
-  <div class="topline"></div>
-  <header>
-    <a href="/"><img src="/assets/worldwide-cargo-express-logo-transparent.png" alt="Worldwide Cargo Express LLC"></a>
-    <div><span>Applications admin</span><button id="logoutButton" type="button" hidden>Log out</button></div>
-  </header>
+  <section class="login-screen" id="loginView">
+    <div class="login-brand"><img src="../assets/worldwide-cargo-express-logo-transparent.png" alt="Worldwide Cargo Express LLC"></div>
+    <div class="login-card"><p class="eyebrow">Recruiting operations</p><h1>Welcome back.</h1><p>Sign in to manage applicants, documents, and quote requests.</p><form id="loginForm"><label for="password">Administrator password</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus><p class="error" id="loginError" role="alert"></p><button class="button primary" type="submit">Open dashboard</button></form></div>
+  </section>
 
-  <main>
-    <section class="login-card" id="loginView">
-      <p class="eyebrow">Secure access</p>
-      <h1>Admin login</h1>
-      <p>Enter the administrator password to view submitted applications and in-progress drafts.</p>
-      <form id="loginForm">
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
-        <p class="error" id="loginError" role="alert"></p>
-        <button type="submit">Log in</button>
-      </form>
-    </section>
+  <div class="app-shell" id="dashboard" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="../" aria-label="Worldwide Cargo Express home"><img src="../assets/worldwide-cargo-express-logo-transparent.png" alt="Worldwide Cargo Express LLC"></a>
+      <p class="workspace-label">Recruiting workspace</p>
+      <nav id="mainNav" aria-label="Admin navigation">
+        <button class="nav-item active" type="button" data-view="home"><span class="nav-icon">⌂</span>Home</button>
+        <button class="nav-item" type="button" data-view="drivers"><span class="nav-icon">D</span>View drivers <b id="navDriverCount">0</b></button>
+        <button class="nav-item" type="button" data-view="quotes"><span class="nav-icon">Q</span>Quote requests <b id="navQuoteCount">0</b></button>
+      </nav>
+      <div class="sidebar-foot"><a href="../quote/index.html" target="_blank" rel="noopener">Open Request a Quote ↗</a><button id="logoutButton" type="button">Log out</button></div>
+    </aside>
 
-    <section class="dashboard" id="dashboard" hidden>
-      <div class="dashboard-head">
-        <div><p class="eyebrow">Recruiting pipeline</p><h1>Driver applications</h1><p id="lastUpdated">Loading…</p></div>
-        <button class="refresh" id="refreshButton" type="button">Refresh</button>
-      </div>
-      <div class="stats">
-        <article><span>Total</span><strong id="totalCount">0</strong></article>
-        <article><span>Submitted</span><strong id="submittedCount">0</strong></article>
-        <article><span>In progress</span><strong id="draftCount">0</strong></article>
-        <article><span>Owner-operators</span><strong id="ownerCount">0</strong></article>
-      </div>
-      <div class="toolbar">
-        <div class="filters" id="filters">
-          <button class="active" type="button" data-filter="all">All</button>
-          <button type="button" data-filter="submitted">Submitted</button>
-          <button type="button" data-filter="draft">In progress</button>
+    <main class="workspace">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobileMenu" type="button" aria-label="Open navigation">☰</button><div><p class="eyebrow" id="viewEyebrow">Recruiting overview</p><h1 id="viewTitle">Home</h1></div><div class="topbar-actions"><span id="lastUpdated">Loading…</span><button class="icon-button" id="refreshButton" type="button" aria-label="Refresh data">↻</button></div>
+      </header>
+
+      <section class="view active-view" id="homeView">
+        <div class="welcome-row"><div><h2>Keep every driver moving.</h2><p>See what needs attention and move applicants through one clear process.</p></div><button class="button primary" type="button" data-go="drivers">View driver pipeline</button></div>
+        <div class="stats">
+          <article class="stat"><span>Active applicants</span><strong id="activeCount">0</strong><small>Across all three stages</small></article><article class="stat"><span>Waiting for a call</span><strong id="phoneCount">0</strong><small>New applicants to contact</small></article><article class="stat"><span>Waiting on documents</span><strong id="docsCount">0</strong><small>CDL or medical card missing</small></article><article class="stat accent"><span>Ready to send</span><strong id="readyCount">0</strong><small>Complete recruiting packets</small></article>
         </div>
-        <label class="search"><span>Search</span><input id="searchInput" type="search" placeholder="Name, email, or phone"></label>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Status</th><th>Applicant</th><th>Type</th><th>Experience</th><th>Role details</th><th>Last activity</th></tr></thead>
-          <tbody id="applicationsBody"></tbody>
-        </table>
-        <div class="empty" id="emptyState" hidden>No applications match this view.</div>
-      </div>
-      <section class="matching">
-        <div class="matching-head"><p class="eyebrow">Dispatch workspace</p><h2>Match a quote to a driver</h2><p>Choose a submitted quote, select a driver, and send the offer to their account.</p></div>
-        <form id="offerForm" class="offer-form">
-          <label>Quote<select id="quoteSelect" required><option value="">Choose a quote</option></select></label>
-          <label>Driver<select id="driverSelect" required><option value="">Choose a driver</option></select></label>
-          <label>Offer amount (optional)<input id="offerRate" inputmode="decimal" placeholder="2,500.00"></label>
-          <label class="notes">Notes for driver<textarea id="offerNotes" maxlength="1000" placeholder="Pickup instructions, schedule, or other details"></textarea></label>
-          <p class="error" id="offerError" role="alert"></p><button type="submit">Send driver offer</button>
-        </form>
-        <div class="matching-grid"><div><h3>Submitted quotes</h3><div class="match-list" id="quoteList"></div></div><div><h3>Recent driver offers</h3><div class="match-list" id="offerList"></div></div></div>
+        <div class="home-grid">
+          <section class="home-panel"><div class="panel-head"><div><p class="eyebrow">Priority queue</p><h3>Needs attention</h3></div><button class="text-button" type="button" data-go="drivers">See all</button></div><div class="attention-list" id="attentionList"></div></section>
+          <section class="home-panel"><div class="panel-head"><div><p class="eyebrow">Recent demand</p><h3>Latest quote requests</h3></div><button class="text-button" type="button" data-go="quotes">See all</button></div><div class="attention-list" id="homeQuoteList"></div></section>
+        </div>
       </section>
-    </section>
-  </main>
+
+      <section class="view" id="driversView" hidden>
+        <div class="view-intro"><div><h2>Driver pipeline</h2><p>Phone call, documents requested, then ready to send.</p></div><button class="button secondary" id="archiveToggle" type="button">View archive <span id="archiveCount">0</span></button></div>
+        <div class="toolbar"><label class="search"><span class="sr-only">Search drivers</span><input id="driverSearch" type="search" placeholder="Search name, phone, or email"></label><label><span class="sr-only">Driver type</span><select id="driverTypeFilter"><option value="all">All driver types</option><option value="owner_operator">Owner-operators</option><option value="company_driver">Company drivers</option></select></label><label><span class="sr-only">Document status</span><select id="documentFilter"><option value="all">All document statuses</option><option value="missing_cdl">Missing CDL</option><option value="missing_medical">Missing medical card</option><option value="complete">Documents complete</option><option value="expired">Medical card expired</option></select></label></div>
+        <div class="pipeline" id="pipeline">
+          <section class="pipeline-column stage-phone"><header><div><span class="step-number">1</span><div><h3>Talk on phone</h3><p>New applicants to contact</p></div></div><b id="phoneColumnCount">0</b></header><div class="card-list" id="phoneColumn"></div></section>
+          <section class="pipeline-column stage-docs"><header><div><span class="step-number">2</span><div><h3>Documents requested</h3><p>Collect CDL and medical card</p></div></div><b id="docsColumnCount">0</b></header><div class="card-list" id="docsColumn"></div></section>
+          <section class="pipeline-column stage-ready"><header><div><span class="step-number">3</span><div><h3>Documents received</h3><p>Ready to send to a carrier</p></div></div><b id="readyColumnCount">0</b></header><div class="card-list" id="readyColumn"></div></section>
+        </div>
+        <section class="archive-view" id="archiveView" hidden><div class="archive-head"><div><p class="eyebrow">Saved records</p><h3>Archived applicants</h3></div><p>These applicants are out of the active pipeline, but their information is still available.</p></div><div class="archive-grid" id="archiveGrid"></div></section>
+      </section>
+
+      <section class="view" id="quotesView" hidden>
+        <div class="view-intro"><div><h2>Quote requests</h2><p>Review every submitted freight request in one place.</p></div><a class="button primary" href="../quote/index.html" target="_blank" rel="noopener">Open request form ↗</a></div>
+        <div class="toolbar quote-toolbar"><label class="search"><span class="sr-only">Search quotes</span><input id="quoteSearch" type="search" placeholder="Search company, contact, or route"></label><label><span class="sr-only">Quote status</span><select id="quoteStatusFilter"><option value="all">All statuses</option><option value="new">New</option><option value="reviewing">Reviewing</option><option value="quoted">Quoted</option><option value="booked">Booked</option><option value="declined">Declined</option></select></label></div>
+        <div class="quote-table-wrap"><table><thead><tr><th>Requester</th><th>Route</th><th>Freight</th><th>Pickup</th><th>Status</th><th>Updated</th></tr></thead><tbody id="quotesBody"></tbody></table><div class="empty-state" id="quotesEmpty" hidden>No quote requests match this view.</div></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="sendDialog"><form method="dialog" class="dialog-card" id="sendForm"><button class="dialog-close" value="cancel" aria-label="Close">×</button><p class="eyebrow">Complete handoff</p><h2>Mark driver as sent</h2><p id="sendDriverName">Record who received this driver’s documents.</p><label for="sentTo">Carrier or contact name</label><input id="sentTo" maxlength="160" placeholder="Company or person" required><p class="error" id="sendError" role="alert"></p><div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button primary" id="confirmSend" value="default">Mark as sent</button></div></form></dialog>
 </body>
 </html>

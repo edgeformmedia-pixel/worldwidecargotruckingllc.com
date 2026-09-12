@@ -1,26 +1,147 @@
 (() => {
   "use strict";
+
   const q = (selector) => document.querySelector(selector);
-  const ui = { login:q("#loginView"),dashboard:q("#dashboard"),loginForm:q("#loginForm"),password:q("#password"),loginError:q("#loginError"),logout:q("#logoutButton"),refresh:q("#refreshButton"),body:q("#applicationsBody"),empty:q("#emptyState"),updated:q("#lastUpdated"),search:q("#searchInput"),filters:q("#filters"),total:q("#totalCount"),submitted:q("#submittedCount"),drafts:q("#draftCount"),owners:q("#ownerCount"),offerForm:q("#offerForm"),quoteSelect:q("#quoteSelect"),driverSelect:q("#driverSelect"),offerRate:q("#offerRate"),offerNotes:q("#offerNotes"),offerError:q("#offerError"),quoteList:q("#quoteList"),offerList:q("#offerList") };
-  let applications=[],quotes=[],drivers=[],offers=[],activeFilter="all",refreshTimer;
-  const experience={under_1:"Less than 1 year","1_plus":"1+ year","2_plus":"2+ years","3_plus":"3+ years","4_plus":"4+ years"},availability={tomorrow:"Tomorrow",this_week:"This week",more_than_week:"More than a week"};
-  function showLogin(){ui.login.hidden=false;ui.dashboard.hidden=true;ui.logout.hidden=true;clearInterval(refreshTimer)}
-  function showDashboard(){ui.login.hidden=true;ui.dashboard.hidden=false;ui.logout.hidden=false;refreshAll();clearInterval(refreshTimer);refreshTimer=setInterval(refreshAll,5000)}
-  function textCell(value,className){const cell=document.createElement("td");if(className)cell.className=className;cell.textContent=value||"—";return cell}
-  function applicantCell(app){const cell=document.createElement("td");cell.className="applicant";const name=document.createElement("strong");name.textContent=app.full_name||"Name not entered";cell.append(name);if(app.email){const email=document.createElement("a");email.href=`mailto:${app.email}`;email.textContent=app.email;cell.append(email)}if(app.phone){const phone=document.createElement("a");phone.href=`tel:${app.phone}`;phone.textContent=app.phone;cell.append(phone)}if(app.cdl_document_uploaded_at){const cdl=document.createElement("a");cdl.href=`https://worldwide-cargo-express.edgeformmedia.workers.dev/api/admin/applications/${app.id}/documents/cdl`;cdl.target="_blank";cdl.rel="noopener";cdl.textContent="Download CDL";cell.append(cdl)}if(app.account_id){const remove=document.createElement("button");remove.type="button";remove.className="delete-account";remove.textContent="Delete account";remove.addEventListener("click",async()=>{if(!confirm(`Delete the login account for ${app.full_name||app.email}? This cannot be undone.`))return;remove.disabled=true;try{const response=await fetch(`/api/admin/accounts/${app.account_id}`,{method:"DELETE"}),data=await response.json();if(!response.ok)throw new Error(data.error||"Unable to delete account.");await refreshAll()}catch(error){alert(error.message||"Unable to delete account.");remove.disabled=false}});cell.append(remove)}const deleteApplication=document.createElement("button");deleteApplication.type="button";deleteApplication.className="delete-application";deleteApplication.textContent="Delete application";deleteApplication.addEventListener("click",async()=>{if(!confirm(`Delete the application for ${app.full_name||app.email||"this driver"} and any uploaded CDL? This cannot be undone.`))return;deleteApplication.disabled=true;try{const response=await fetch(`/api/admin/applications/${app.id}`,{method:"DELETE"}),data=await response.json();if(!response.ok)throw new Error(data.error||"Unable to delete application.");await refreshAll()}catch(error){alert(error.message||"Unable to delete application.");deleteApplication.disabled=false}});cell.append(deleteApplication);return cell}
-  function statusCell(app){const cell=document.createElement("td"),badge=document.createElement("span");badge.className=`badge ${app.status}`;badge.textContent=app.status==="submitted"?"Submitted":"In progress";cell.append(badge);return cell}
-  function detailsCell(app){const cell=document.createElement("td");cell.className="details";const strong=document.createElement("strong"),detail=document.createElement("span");detail.className="muted";if(app.driver_type==="owner_operator"){strong.textContent=app.truck_year?`${app.truck_year} truck`:"Truck not entered";detail.textContent=`${app.truck_mileage?`${Number(app.truck_mileage).toLocaleString()} mi`:"mileage pending"} · Plate: ${app.has_plate||"pending"}`}else{strong.textContent=`Amazon Relay: ${app.amazon_relay_experience||"pending"}`;detail.textContent=`Start: ${availability[app.start_availability]||"pending"}`}cell.append(strong,detail);return cell}
-  function dateCell(app){const cell=document.createElement("td"),date=new Date(`${app.updated_at}${app.updated_at.endsWith("Z")?"":"Z"}`),strong=document.createElement("strong"),time=document.createElement("div");strong.textContent=date.toLocaleDateString([],{month:"short",day:"numeric",year:"numeric"});time.className="muted";time.textContent=date.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});cell.append(strong,time);return cell}
-  function renderApplications(){const query=ui.search.value.trim().toLowerCase(),visible=applications.filter((app)=>(activeFilter==="all"||app.status===activeFilter)&&(!query||[app.full_name,app.email,app.phone].some((value)=>String(value||"").toLowerCase().includes(query))));ui.body.replaceChildren();for(const app of visible){const row=document.createElement("tr");row.append(statusCell(app),applicantCell(app),textCell(app.driver_type==="owner_operator"?"Owner-operator":"Company driver"),textCell(experience[app.experience]||"—"),detailsCell(app),dateCell(app));ui.body.append(row)}ui.empty.hidden=visible.length!==0;ui.total.textContent=applications.length;ui.submitted.textContent=applications.filter((app)=>app.status==="submitted").length;ui.drafts.textContent=applications.filter((app)=>app.status==="draft").length;ui.owners.textContent=applications.filter((app)=>app.driver_type==="owner_operator").length}
-  function option(value,label){const item=document.createElement("option");item.value=value;item.textContent=label;return item}
-  function matchEmpty(container,text){const item=document.createElement("div");item.className="match-empty";item.textContent=text;container.replaceChildren(item)}
-  function renderMatching(){const chosenQuote=ui.quoteSelect.value,chosenDriver=ui.driverSelect.value;ui.quoteSelect.replaceChildren(option("","Choose a quote"),...quotes.filter((quote)=>!["booked","declined"].includes(quote.status)).map((quote)=>option(quote.id,`${quote.pickup_city}, ${quote.pickup_state} → ${quote.delivery_city}, ${quote.delivery_state} · ${quote.company_name}`)));ui.driverSelect.replaceChildren(option("","Choose a driver"),...drivers.map((driver)=>option(driver.id,`${driver.full_name} · ${driver.driver_type==="owner_operator"?"Owner-operator":"Company driver"}`)));ui.quoteSelect.value=chosenQuote;ui.driverSelect.value=chosenDriver;
-    if(!quotes.length)matchEmpty(ui.quoteList,"No submitted quotes yet.");else ui.quoteList.replaceChildren(...quotes.map((quote)=>{const item=document.createElement("article"),title=document.createElement("strong"),detail=document.createElement("p"),select=document.createElement("select");item.className="match-item";title.textContent=`${quote.pickup_city}, ${quote.pickup_state} → ${quote.delivery_city}, ${quote.delivery_state}`;detail.textContent=`${quote.company_name} · ${quote.equipment} · ${Number(quote.total_weight||0).toLocaleString()} lb`;select.dataset.quote=quote.id;["new","reviewing","quoted","booked","declined"].forEach((value)=>select.append(option(value,value[0].toUpperCase()+value.slice(1))));select.value=quote.status;item.append(title,detail,select);return item}));
-    if(!offers.length)matchEmpty(ui.offerList,"No driver offers sent yet.");else ui.offerList.replaceChildren(...offers.map((offer)=>{const quote=quotes.find((item)=>item.id===offer.quote_id),item=document.createElement("article"),title=document.createElement("strong"),detail=document.createElement("p");item.className="match-item";title.textContent=offer.driver_name;const amount=offer.offered_rate_cents==null?"Rate open":new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(offer.offered_rate_cents/100);detail.textContent=`${quote?`${quote.pickup_city}, ${quote.pickup_state} → ${quote.delivery_city}, ${quote.delivery_state}`:"Quote"} · ${amount} · ${offer.status}`;item.append(title,detail);return item}))}
-  async function refreshAll(){try{const [appsResponse,quotesResponse]=await Promise.all([fetch("/api/admin/applications",{cache:"no-store"}),fetch("/api/admin/quotes",{cache:"no-store"})]);if(appsResponse.status===401||quotesResponse.status===401){showLogin();return}if(!appsResponse.ok||!quotesResponse.ok)throw new Error();const appData=await appsResponse.json(),quoteData=await quotesResponse.json();applications=appData.applications;quotes=quoteData.quotes;drivers=quoteData.drivers;offers=quoteData.offers;renderApplications();renderMatching();ui.updated.textContent=`Live view · updated ${new Date().toLocaleTimeString([],{hour:"numeric",minute:"2-digit",second:"2-digit"})}`}catch{ui.updated.textContent="Unable to refresh. Trying again shortly."}}
-  ui.loginForm.addEventListener("submit",async(event)=>{event.preventDefault();ui.loginError.textContent="";const button=ui.loginForm.querySelector("button");button.disabled=true;try{const response=await fetch("/api/admin/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({password:ui.password.value})});if(!response.ok)throw new Error("Incorrect password.");ui.password.value="";showDashboard()}catch(error){ui.loginError.textContent=error.message}finally{button.disabled=false}});
-  ui.logout.addEventListener("click",async()=>{await fetch("/api/admin/logout",{method:"POST"});showLogin()});ui.refresh.addEventListener("click",refreshAll);ui.search.addEventListener("input",renderApplications);ui.filters.addEventListener("click",(event)=>{const button=event.target.closest("button[data-filter]");if(!button)return;activeFilter=button.dataset.filter;ui.filters.querySelectorAll("button").forEach((item)=>item.classList.toggle("active",item===button));renderApplications()});
-  ui.offerForm.addEventListener("submit",async(event)=>{event.preventDefault();ui.offerError.textContent="";const button=ui.offerForm.querySelector("button");button.disabled=true;try{const response=await fetch("/api/admin/offers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({quoteId:ui.quoteSelect.value,driverAccountId:ui.driverSelect.value,offeredRate:ui.offerRate.value.replaceAll(",",""),notes:ui.offerNotes.value})}),data=await response.json();if(!response.ok)throw new Error(data.error||"Unable to send offer.");ui.offerRate.value="";ui.offerNotes.value="";await refreshAll()}catch(error){ui.offerError.textContent=error.message}finally{button.disabled=false}});
-  ui.quoteList.addEventListener("change",async(event)=>{const select=event.target.closest("select[data-quote]");if(!select)return;select.disabled=true;const response=await fetch(`/api/admin/quotes/${select.dataset.quote}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({status:select.value})});if(response.ok)await refreshAll();else select.disabled=false});
-  fetch("/api/admin/session",{cache:"no-store"}).then((response)=>response.ok?showDashboard():showLogin()).catch(showLogin);
+  const ui = {
+    login: q("#loginView"), dashboard: q("#dashboard"), loginForm: q("#loginForm"), password: q("#password"), loginError: q("#loginError"), logout: q("#logoutButton"), refresh: q("#refreshButton"), updated: q("#lastUpdated"), nav: q("#mainNav"), sidebar: q(".sidebar"), mobileMenu: q("#mobileMenu"), viewTitle: q("#viewTitle"), viewEyebrow: q("#viewEyebrow"),
+    homeView: q("#homeView"), driversView: q("#driversView"), quotesView: q("#quotesView"), activeCount: q("#activeCount"), phoneCount: q("#phoneCount"), docsCount: q("#docsCount"), readyCount: q("#readyCount"), navDriverCount: q("#navDriverCount"), navQuoteCount: q("#navQuoteCount"), attentionList: q("#attentionList"), homeQuoteList: q("#homeQuoteList"),
+    driverSearch: q("#driverSearch"), driverTypeFilter: q("#driverTypeFilter"), documentFilter: q("#documentFilter"), phoneColumn: q("#phoneColumn"), docsColumn: q("#docsColumn"), readyColumn: q("#readyColumn"), phoneColumnCount: q("#phoneColumnCount"), docsColumnCount: q("#docsColumnCount"), readyColumnCount: q("#readyColumnCount"), archiveToggle: q("#archiveToggle"), archiveCount: q("#archiveCount"), pipeline: q("#pipeline"), archiveView: q("#archiveView"), archiveGrid: q("#archiveGrid"),
+    quoteSearch: q("#quoteSearch"), quoteStatusFilter: q("#quoteStatusFilter"), quotesBody: q("#quotesBody"), quotesEmpty: q("#quotesEmpty"), sendDialog: q("#sendDialog"), sendForm: q("#sendForm"), sendDriverName: q("#sendDriverName"), sentTo: q("#sentTo"), sendError: q("#sendError"), confirmSend: q("#confirmSend"),
+  };
+
+  const viewCopy = { home: ["Recruiting overview", "Home"], drivers: ["Applicant workflow", "View drivers"], quotes: ["Freight opportunities", "Quote requests"] };
+  const experience = { under_1: "Less than 1 year", "1_plus": "1+ year", "2_plus": "2+ years", "3_plus": "3+ years", "4_plus": "4+ years" };
+  const stageLabels = { phone_screen: "Phone call", docs_requested: "Documents", docs_received: "Ready to send" };
+  let applications = [], quotes = [], refreshTimer, activeView = "home", showingArchive = false, sendTarget = null;
+
+  function showLogin() { ui.login.hidden = false; ui.dashboard.hidden = true; clearInterval(refreshTimer); }
+  function showDashboard() { ui.login.hidden = true; ui.dashboard.hidden = false; refreshAll(); clearInterval(refreshTimer); refreshTimer = setInterval(refreshAll, 15000); }
+  function applicationStage(app) { return app.recruiting_stage || "phone_screen"; }
+  function isExpired(app) { return Boolean(app.medical_card_expiration && app.medical_card_expiration < new Date().toISOString().slice(0, 10)); }
+  function readableDate(value, withTime = false) { if (!value) return "—"; const date = new Date(`${value}${String(value).includes("T") && !String(value).endsWith("Z") ? "Z" : ""}`); if (Number.isNaN(date.getTime())) return value; return withTime ? date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }); }
+  function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; }
+  function empty(container, text) { container.replaceChildren(element("div", "empty-column", text)); }
+
+  function switchView(view) {
+    activeView = view; showingArchive = false;
+    for (const name of ["home", "drivers", "quotes"]) ui[`${name}View`].hidden = name !== view;
+    ui.nav.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
+    [ui.viewEyebrow.textContent, ui.viewTitle.textContent] = viewCopy[view];
+    ui.sidebar.classList.remove("open");
+    if (view === "drivers") { ui.pipeline.hidden = false; ui.archiveView.hidden = true; ui.archiveToggle.firstChild.textContent = "View archive "; }
+  }
+
+  function documentBadge(label, received, expired = false) {
+    const badge = element("span", `doc-check${received ? " received" : ""}${expired ? " expired" : ""}`);
+    badge.textContent = `${received ? expired ? "!" : "✓" : "○"} ${label}`;
+    return badge;
+  }
+
+  function actionButton(label, className, action, disabled = false) {
+    const button = element("button", className, label); button.type = "button"; button.dataset.action = action; button.disabled = disabled; return button;
+  }
+
+  function driverCard(app, archived = false) {
+    const card = element("article", "driver-card"); card.dataset.id = app.id;
+    const top = element("div", "driver-card-top"), identity = element("div"), name = element("h4", "", app.full_name || "Name not entered"), type = element("span", "type", app.driver_type === "owner_operator" ? "Owner-operator" : "Company driver"), age = element("span", "age", readableDate(app.submitted_at || app.updated_at));
+    identity.append(name, type); top.append(identity, app.sent_at ? element("span", "sent-pill", "Sent") : age);
+    const contact = element("div", "contact");
+    if (app.phone) { const phone = element("a", "", app.phone); phone.href = `tel:${app.phone}`; contact.append(phone); }
+    if (app.email) { const email = element("a", "", app.email); email.href = `mailto:${app.email}`; contact.append(email); }
+    const docs = element("div", "doc-checks"); docs.append(documentBadge("CDL", Boolean(app.cdl_document_uploaded_at)), documentBadge("Medical card", Boolean(app.medical_card_uploaded_at), isExpired(app)));
+    card.append(top, contact, docs);
+    if (app.medical_card_expiration) card.append(element("p", "driver-note", `Medical card expires ${readableDate(app.medical_card_expiration)}${isExpired(app) ? " — expired" : ""}`));
+    if (app.sent_at) card.append(element("p", "driver-note", `Sent to ${app.sent_to} on ${readableDate(app.sent_at)}`));
+    const actions = element("div", "driver-actions");
+    if (archived) {
+      actions.append(actionButton("Restore", "next", "restore"));
+    } else {
+      const stage = applicationStage(app);
+      if (stage === "phone_screen") actions.append(actionButton("Phone call complete", "next", "request-docs"));
+      if (stage === "docs_requested") {
+        if (app.cdl_document_uploaded_at) actions.append(downloadLink(app, "cdl", "Download CDL"));
+        if (app.medical_card_uploaded_at) actions.append(downloadLink(app, "medical-card", "Medical card"));
+        actions.append(actionButton("Documents complete", "next", "docs-complete", !app.cdl_document_uploaded_at || !app.medical_card_uploaded_at));
+      }
+      if (stage === "docs_received") {
+        actions.append(downloadLink(app, "cdl", "Download CDL"), downloadLink(app, "medical-card", "Medical card"));
+        actions.append(actionButton(app.sent_at ? "Update sent record" : "Mark as sent", "next", "mark-sent"));
+      }
+      actions.append(actionButton("Archive", "archive", "archive"));
+    }
+    card.append(actions); return card;
+  }
+
+  function downloadLink(app, kind, label) { const link = element("a", "", label); link.href = `/api/admin/applications/${app.id}/documents/${kind}`; link.target = "_blank"; link.rel = "noopener"; return link; }
+
+  function filteredApplications(archived) {
+    const search = ui.driverSearch.value.trim().toLowerCase(), type = ui.driverTypeFilter.value, doc = ui.documentFilter.value;
+    return applications.filter((app) => app.status === "submitted" && Boolean(app.archived_at) === archived && (!search || [app.full_name, app.phone, app.email].some((value) => String(value || "").toLowerCase().includes(search))) && (type === "all" || app.driver_type === type) && (doc === "all" || (doc === "missing_cdl" && !app.cdl_document_uploaded_at) || (doc === "missing_medical" && !app.medical_card_uploaded_at) || (doc === "complete" && app.cdl_document_uploaded_at && app.medical_card_uploaded_at) || (doc === "expired" && isExpired(app))));
+  }
+
+  function renderDrivers() {
+    const active = filteredApplications(false), archived = filteredApplications(true), groups = { phone_screen: [], docs_requested: [], docs_received: [] };
+    active.forEach((app) => groups[applicationStage(app)].push(app));
+    const columns = [[ui.phoneColumn, ui.phoneColumnCount, groups.phone_screen, "No applicants are waiting for a call."], [ui.docsColumn, ui.docsColumnCount, groups.docs_requested, "No applicants are waiting on documents."], [ui.readyColumn, ui.readyColumnCount, groups.docs_received, "No complete driver packets yet."]];
+    for (const [container, count, items, message] of columns) { count.textContent = items.length; if (!items.length) empty(container, message); else container.replaceChildren(...items.map((app) => driverCard(app))); }
+    ui.archiveCount.textContent = applications.filter((app) => app.status === "submitted" && app.archived_at).length;
+    if (!archived.length) empty(ui.archiveGrid, "No archived applicants match these filters."); else ui.archiveGrid.replaceChildren(...archived.map((app) => driverCard(app, true)));
+  }
+
+  function attentionItem(title, detail, badge, quote = false) { const item = element("article", "attention-item"), copy = element("div"), strong = element("strong", "", title), p = element("p", "", detail), state = element("span", quote ? "quote-state" : "", badge); copy.append(strong, p); item.append(copy, state); return item; }
+
+  function renderHome() {
+    const active = applications.filter((app) => app.status === "submitted" && !app.archived_at), phone = active.filter((app) => applicationStage(app) === "phone_screen"), docs = active.filter((app) => applicationStage(app) === "docs_requested"), ready = active.filter((app) => applicationStage(app) === "docs_received");
+    ui.activeCount.textContent = active.length; ui.phoneCount.textContent = phone.length; ui.docsCount.textContent = docs.length; ui.readyCount.textContent = ready.length; ui.navDriverCount.textContent = active.length; ui.navQuoteCount.textContent = quotes.length;
+    const priority = [...phone.map((app) => attentionItem(app.full_name || "Unnamed applicant", app.phone || app.email || "Contact details pending", "Call")), ...docs.filter((app) => !app.cdl_document_uploaded_at || !app.medical_card_uploaded_at).map((app) => attentionItem(app.full_name || "Unnamed applicant", `${app.cdl_document_uploaded_at ? "CDL received" : "CDL missing"} · ${app.medical_card_uploaded_at ? "Medical card received" : "Medical card missing"}`, "Documents"))].slice(0, 6);
+    if (!priority.length) empty(ui.attentionList, "Nothing urgent right now."); else ui.attentionList.replaceChildren(...priority);
+    const recentQuotes = quotes.slice(0, 6).map((quote) => attentionItem(quote.company_name || quote.full_name, `${quote.pickup_city}, ${quote.pickup_state} → ${quote.delivery_city}, ${quote.delivery_state}`, quote.status, true));
+    if (!recentQuotes.length) empty(ui.homeQuoteList, "No submitted quote requests yet."); else ui.homeQuoteList.replaceChildren(...recentQuotes);
+  }
+
+  function renderQuotes() {
+    const search = ui.quoteSearch.value.trim().toLowerCase(), status = ui.quoteStatusFilter.value;
+    const visible = quotes.filter((quote) => (status === "all" || quote.status === status) && (!search || [quote.company_name, quote.full_name, quote.email, quote.pickup_city, quote.pickup_state, quote.delivery_city, quote.delivery_state].some((value) => String(value || "").toLowerCase().includes(search))));
+    ui.quotesBody.replaceChildren(...visible.map((quote) => {
+      const row = document.createElement("tr"), person = element("td", "quote-person"), route = element("td", "quote-route"), freight = document.createElement("td"), pickup = document.createElement("td"), state = document.createElement("td"), updated = document.createElement("td"), name = element("strong", "", quote.company_name || quote.full_name || "No company"), contact = element("small", "", `${quote.full_name || "Contact pending"} · ${quote.email || quote.phone || "No contact"}`), routeName = element("strong", "", `${quote.pickup_city}, ${quote.pickup_state} → ${quote.delivery_city}, ${quote.delivery_state}`), routeDetail = element("small", "", `${quote.pickup_zip || ""} → ${quote.delivery_zip || ""}`), freightName = element("span", "", quote.commodity || "Freight pending"), freightDetail = element("small", "", `${quote.equipment || "Equipment pending"} · ${Number(quote.total_weight || 0).toLocaleString()} lb`), select = element("select", "quote-status");
+      person.append(name, contact); route.append(routeName, routeDetail); freight.append(freightName, freightDetail); pickup.textContent = readableDate(quote.pickup_date); ["new", "reviewing", "quoted", "booked", "declined"].forEach((value) => { const option = element("option", "", value[0].toUpperCase() + value.slice(1)); option.value = value; select.append(option); }); select.value = quote.status; select.dataset.quote = quote.id; state.append(select); updated.textContent = readableDate(quote.updated_at, true); row.append(person, route, freight, pickup, state, updated); return row;
+    }));
+    ui.quotesEmpty.hidden = visible.length !== 0;
+  }
+
+  function renderAll() { renderHome(); renderDrivers(); renderQuotes(); }
+  async function patchApplication(id, body) { const response = await fetch(`/api/admin/applications/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Unable to update applicant."); await refreshAll(); }
+
+  async function refreshAll() {
+    try {
+      const [appsResponse, quotesResponse] = await Promise.all([fetch("/api/admin/applications", { cache: "no-store" }), fetch("/api/admin/quotes", { cache: "no-store" })]);
+      if (appsResponse.status === 401 || quotesResponse.status === 401) { showLogin(); return; }
+      if (!appsResponse.ok || !quotesResponse.ok) throw new Error();
+      const appData = await appsResponse.json(), quoteData = await quotesResponse.json(); applications = appData.applications || []; quotes = quoteData.quotes || []; renderAll(); ui.updated.textContent = `Updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+    } catch { ui.updated.textContent = "Unable to refresh"; }
+  }
+
+  async function driverAction(event) {
+    const button = event.target.closest("button[data-action]"), card = event.target.closest("[data-id]"); if (!button || !card) return; const app = applications.find((item) => item.id === card.dataset.id); if (!app) return; button.disabled = true;
+    try {
+      if (button.dataset.action === "request-docs") await patchApplication(app.id, { stage: "docs_requested" });
+      if (button.dataset.action === "docs-complete") await patchApplication(app.id, { stage: "docs_received" });
+      if (button.dataset.action === "archive") await patchApplication(app.id, { archive: true });
+      if (button.dataset.action === "restore") await patchApplication(app.id, { archive: false });
+      if (button.dataset.action === "mark-sent") { sendTarget = app; ui.sendDriverName.textContent = `Record who received ${app.full_name || "this driver"}’s CDL and medical card.`; ui.sentTo.value = app.sent_to || ""; ui.sendError.textContent = ""; ui.sendDialog.showModal(); button.disabled = false; }
+    } catch (error) { alert(error.message || "Unable to update applicant."); button.disabled = false; }
+  }
+
+  ui.loginForm.addEventListener("submit", async (event) => { event.preventDefault(); ui.loginError.textContent = ""; const button = ui.loginForm.querySelector("button"); button.disabled = true; try { const response = await fetch("/api/admin/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: ui.password.value }) }); if (!response.ok) throw new Error("Incorrect password."); ui.password.value = ""; showDashboard(); } catch (error) { ui.loginError.textContent = error.message; } finally { button.disabled = false; } });
+  ui.logout.addEventListener("click", async () => { await fetch("/api/admin/logout", { method: "POST" }); showLogin(); });
+  ui.refresh.addEventListener("click", refreshAll); ui.mobileMenu.addEventListener("click", () => ui.sidebar.classList.toggle("open"));
+  ui.nav.addEventListener("click", (event) => { const button = event.target.closest("[data-view]"); if (button) switchView(button.dataset.view); });
+  document.addEventListener("click", (event) => { const button = event.target.closest("[data-go]"); if (button) switchView(button.dataset.go); });
+  [ui.driverSearch, ui.driverTypeFilter, ui.documentFilter].forEach((control) => control.addEventListener("input", renderDrivers));
+  [ui.quoteSearch, ui.quoteStatusFilter].forEach((control) => control.addEventListener("input", renderQuotes));
+  ui.phoneColumn.addEventListener("click", driverAction); ui.docsColumn.addEventListener("click", driverAction); ui.readyColumn.addEventListener("click", driverAction); ui.archiveGrid.addEventListener("click", driverAction);
+  ui.archiveToggle.addEventListener("click", () => { showingArchive = !showingArchive; ui.pipeline.hidden = showingArchive; ui.archiveView.hidden = !showingArchive; ui.archiveToggle.firstChild.textContent = showingArchive ? "Back to pipeline " : "View archive "; });
+  ui.quotesBody.addEventListener("change", async (event) => { const select = event.target.closest("select[data-quote]"); if (!select) return; select.disabled = true; try { const response = await fetch(`/api/admin/quotes/${select.dataset.quote}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: select.value }) }); if (!response.ok) throw new Error(); await refreshAll(); } catch { select.disabled = false; alert("Unable to update quote status."); } });
+  ui.sendForm.addEventListener("submit", async (event) => { event.preventDefault(); if (event.submitter?.value === "cancel") { ui.sendDialog.close(); return; } if (!sendTarget || !ui.sentTo.value.trim()) { ui.sendError.textContent = "Enter who received the documents."; return; } ui.confirmSend.disabled = true; try { await patchApplication(sendTarget.id, { sentTo: ui.sentTo.value }); ui.sendDialog.close(); sendTarget = null; } catch (error) { ui.sendError.textContent = error.message; } finally { ui.confirmSend.disabled = false; } });
+  fetch("/api/admin/session", { cache: "no-store" }).then((response) => response.ok ? showDashboard() : showLogin()).catch(showLogin);
 })();
