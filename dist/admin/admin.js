@@ -57,14 +57,13 @@
       actions.append(actionButton("Restore", "next", "restore"));
     } else {
       const stage = applicationStage(app);
+      if (app.cdl_document_uploaded_at) actions.append(documentLink(app, "cdl", "View CDL"));
+      if (app.medical_card_uploaded_at) actions.append(documentLink(app, "medical-card", "View medical card"));
       if (stage === "phone_screen") actions.append(actionButton("Phone call complete", "next", "request-docs"));
       if (stage === "docs_requested") {
-        if (app.cdl_document_uploaded_at) actions.append(documentLink(app, "cdl", "View CDL"));
-        if (app.medical_card_uploaded_at) actions.append(documentLink(app, "medical-card", "View medical card"));
         actions.append(actionButton("Documents complete", "next", "docs-complete", !app.cdl_document_uploaded_at || !app.medical_card_uploaded_at));
       }
       if (stage === "docs_received") {
-        actions.append(documentLink(app, "cdl", "View CDL"), documentLink(app, "medical-card", "View medical card"));
         actions.append(actionButton(app.sent_at ? "Update sent record" : "Mark as sent", "next", "mark-sent"));
       }
       actions.append(actionButton("Archive", "archive", "archive"));
