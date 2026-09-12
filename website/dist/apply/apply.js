@@ -50,6 +50,7 @@
   };
 
   const commonSteps = [
+    { field: "cdl_upload", label: "Optional document", title: "Want to get ahead?", help: "You can securely upload your CDL now, or continue without it.", type: "documents" },
     { field: "full_name", label: "About you", title: "Let’s start with your name.", help: "Enter your full legal name.", type: "text", inputType: "text", placeholder: "Full name", autocomplete: "name" },
     { field: "phone", label: "Contact details", title: "What’s the best phone number to reach you?", help: "Include your area code.", type: "text", inputType: "tel", placeholder: "(555) 555-5555", autocomplete: "tel" },
     { field: "email", label: "Contact details", title: "What’s your email address?", help: "We’ll use this only to contact you about your application.", type: "text", inputType: "email", placeholder: "you@example.com", autocomplete: "email" },
@@ -188,6 +189,59 @@
     setTimeout(() => input.focus(), 50);
   }
 
+  function renderDocuments() {
+    const choice = state.answers.cdl_upload || "";
+    makeChoices([["yes", "Yes, upload my CDL"], ["no", "No, continue without it"]], choice, (value) => {
+      state.answers.cdl_upload = value;
+      persist();
+      render();
+    });
+    if (choice !== "yes") { ui.next.hidden = false; return; }
+
+    const consent = document.createElement("label");
+    consent.className = "document-consent";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.required = true;
+    const copy = document.createElement("span");
+    copy.textContent = "I agree to the secure processing of my CDL solely to evaluate my driver application.";
+    consent.append(checkbox, copy);
+    const input = document.createElement("input");
+    input.className = "document-input";
+    input.type = "file";
+    input.accept = "application/pdf,image/jpeg,image/png";
+    input.setAttribute("aria-label", "Upload CDL");
+    const note = document.createElement("p");
+    note.className = "input-note";
+    note.textContent = "Optional. Upload a JPG, PNG, or PDF up to 5 MB.";
+    const status = document.createElement("p");
+    status.className = "input-note";
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (!checkbox.checked) { status.textContent = "Please confirm consent before uploading."; input.value = ""; return; }
+      if (file.size > 5 * 1024 * 1024) { status.textContent = "Choose a file smaller than 5 MB."; input.value = ""; return; }
+      const data = new FormData();
+      data.append("editToken", state.editToken);
+      data.append("consent", "yes");
+      data.append("file", file);
+      input.disabled = true;
+      ui.next.disabled = true;
+      status.textContent = "Uploading securely…";
+      try {
+        const response = await fetch(`/api/applications/${state.id}/documents/cdl`, { method: "POST", body: data });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Upload failed.");
+        status.textContent = "CDL uploaded.";
+      } catch (error) {
+        status.textContent = error.message || "Upload failed. Please try again.";
+        input.disabled = false;
+      } finally { ui.next.disabled = false; }
+    });
+    ui.answer.append(consent, input, note, status);
+    ui.next.hidden = false;
+  }
+
   function renderChoices(step) {
     makeChoices(step.options, state.answers[step.field] || "", (value) => {
       state.answers[step.field] = value;
@@ -296,6 +350,7 @@
     ui.title.textContent = step.title || "Review your application.";
     ui.help.textContent = step.help || "";
     if (step.type === "text") renderInput(step);
+    else if (step.type === "documents") renderDocuments();
     else if (step.type === "choices") renderChoices(step);
     else renderReview();
   }

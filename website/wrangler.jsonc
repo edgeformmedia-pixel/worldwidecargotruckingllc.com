@@ -18,6 +18,12 @@
       "migrations_dir": "./migrations"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "DRIVER_DOCUMENTS",
+      "bucket_name": "wcx-driver-documents"
+    }
+  ],
   "vars": {
     "PUBLIC_ORIGINS": "https://edgeformmedia-pixel.github.io,https://worldwidecargoexpressllc.com,https://www.worldwidecargoexpressllc.com"
   },

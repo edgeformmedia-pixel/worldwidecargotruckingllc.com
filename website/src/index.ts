@@ -20,6 +20,8 @@ type ApplicationRow = {
   created_at: string;
   updated_at: string;
   submitted_at: string | null;
+  cdl_document_uploaded_at?: string | null;
+  cdl_processing_consent_at?: string | null;
   account_id?: string | null;
   review_status?: "new" | "reviewing" | "approved" | "declined";
 };
@@ -105,6 +107,8 @@ const EXPERIENCE_VALUES = new Set(["under_1", "1_plus", "2_plus", "3_plus", "4_p
 const GENDER_VALUES = new Set(["female", "male", "non_binary", "prefer_not_to_say"]);
 const YES_NO_VALUES = new Set(["yes", "no"]);
 const START_VALUES = new Set(["tomorrow", "this_week", "more_than_week"]);
+const CDL_CONTENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+const MAX_CDL_SIZE_BYTES = 5 * 1024 * 1024;
 // Cloudflare Workers Web Crypto caps PBKDF2 at 100,000 iterations per operation.
 const PASSWORD_ITERATIONS = 100_000;
 const ACCOUNT_ROLES = new Set(["driver", "broker", "shipper"]);
@@ -344,6 +348,53 @@ async function updateApplication(request: Request, env: Env, id: string): Promis
 
   if (result.meta.changes !== 1) return errorResponse("Draft not found or already submitted.", 404);
   return json({ ok: true, savedAt: now });
+}
+
+async function uploadCdl(request: Request, env: Env, id: string): Promise<Response> {
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (contentLength > MAX_CDL_SIZE_BYTES + 128_000) return errorResponse("The CDL file must be 5 MB or smaller.", 413);
+  let form: FormData;
+  try { form = await request.formData(); } catch { return errorResponse("Choose a valid CDL file to upload.", 400); }
+  const editToken = form.get("editToken");
+  const consent = form.get("consent");
+  const file = form.get("file");
+  if (typeof editToken !== "string" || consent !== "yes" || !(file instanceof File)) {
+    return errorResponse("Please confirm consent and choose a CDL file.", 400);
+  }
+  if (!CDL_CONTENT_TYPES.has(file.type) || file.size === 0 || file.size > MAX_CDL_SIZE_BYTES) {
+    return errorResponse("Upload a JPG, PNG, or PDF CDL file up to 5 MB.", 400);
+  }
+  const tokenHash = await sha256(editToken);
+  const application = await env.DB.prepare(
+    "SELECT id FROM applications WHERE id = ?1 AND edit_token_hash = ?2 AND status = 'draft' LIMIT 1",
+  ).bind(id, tokenHash).first<{ id: string }>();
+  if (!application) return errorResponse("Application draft not found.", 404);
+  const objectKey = `applications/${id}/cdl`;
+  try {
+    await env.DRIVER_DOCUMENTS.put(objectKey, file, {
+      httpMetadata: { contentType: file.type, contentDisposition: "attachment; filename=\"cdl-license\"" },
+    });
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      "UPDATE applications SET cdl_document_uploaded_at = ?1, cdl_processing_consent_at = ?1, updated_at = ?1 WHERE id = ?2 AND edit_token_hash = ?3",
+    ).bind(now, id, tokenHash).run();
+    return json({ ok: true, uploadedAt: now });
+  } catch {
+    return errorResponse("We couldn’t upload that file. Please try again.", 500);
+  }
+}
+
+async function downloadCdl(request: Request, env: Env, id: string): Promise<Response> {
+  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const application = await env.DB.prepare(
+    "SELECT cdl_document_uploaded_at FROM applications WHERE id = ?1 LIMIT 1",
+  ).bind(id).first<ApplicationRow>();
+  if (!application?.cdl_document_uploaded_at) return errorResponse("CDL document not found.", 404);
+  const object = await env.DRIVER_DOCUMENTS.get(`applications/${id}/cdl`);
+  if (!object) return errorResponse("CDL document not found.", 404);
+  const headers = new Headers({ "cache-control": "private, no-store", "content-disposition": "attachment; filename=\"cdl-license\"" });
+  object.writeHttpMetadata(headers);
+  return new Response(object.body, { headers });
 }
 
 async function submitApplication(request: Request, env: Env, id: string): Promise<Response> {
@@ -606,10 +657,10 @@ async function listApplications(request: Request, env: Env): Promise<Response> {
   const allowedStatus = status === "draft" || status === "submitted" ? status : null;
   const statement = allowedStatus
     ? env.DB.prepare(
-      "SELECT id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
     ).bind(allowedStatus)
     : env.DB.prepare(
-      "SELECT id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
     );
   const result = await statement.all<ApplicationRow>();
   return json({ ok: true, applications: result.results });
@@ -620,6 +671,8 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   const path = url.pathname;
 
   if (request.method === "POST" && path === "/api/applications") return createApplication(request, env);
+  const cdlUploadMatch = path.match(/^\/api\/applications\/([0-9a-f-]{36})\/documents\/cdl$/u);
+  if (cdlUploadMatch && request.method === "POST") return uploadCdl(request, env, cdlUploadMatch[1]);
   const applicationMatch = path.match(/^\/api\/applications\/([0-9a-f-]{36})(?:\/(submit))?$/u);
   if (applicationMatch && request.method === "PATCH" && !applicationMatch[2]) {
     return updateApplication(request, env, applicationMatch[1]);
@@ -648,6 +701,8 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     return (await hasAdminSession(request, env)) ? json({ ok: true }) : errorResponse("Unauthorized.", 401);
   }
   if (request.method === "GET" && path === "/api/admin/applications") return listApplications(request, env);
+  const cdlDownloadMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/documents\/cdl$/u);
+  if (cdlDownloadMatch && request.method === "GET") return downloadCdl(request, env, cdlDownloadMatch[1]);
   if (request.method === "GET" && path === "/api/admin/quotes") return adminQuotes(request, env);
   if (request.method === "POST" && path === "/api/admin/offers") return createDriverOffer(request, env);
   const adminQuoteMatch = path.match(/^\/api\/admin\/quotes\/([0-9a-f-]{36})$/u);
