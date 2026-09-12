@@ -498,7 +498,7 @@ async function uploadCdl(request: Request, env: Env, id: string): Promise<Respon
   const objectKey = `applications/${id}/cdl`;
   try {
     await env.DRIVER_DOCUMENTS.put(objectKey, file, {
-      httpMetadata: { contentType: file.type, contentDisposition: `attachment; filename=\"cdl-license.${cdlExtension(file.type)}\"` },
+      httpMetadata: { contentType: file.type, contentDisposition: `inline; filename=\"cdl-license.${cdlExtension(file.type)}\"` },
     });
     const now = new Date().toISOString();
     await env.DB.prepare(
@@ -520,7 +520,7 @@ async function downloadCdl(request: Request, env: Env, id: string): Promise<Resp
   if (!object) return errorResponse("CDL document not found.", 404);
   const headers = new Headers({ "cache-control": "private, no-store" });
   object.writeHttpMetadata(headers);
-  headers.set("content-disposition", `attachment; filename=\"cdl-license.${cdlExtension(object.httpMetadata?.contentType)}\"`);
+  headers.set("content-disposition", `inline; filename=\"cdl-license.${cdlExtension(object.httpMetadata?.contentType)}\"`);
   return new Response(object.body, { headers });
 }
 
@@ -550,7 +550,7 @@ async function uploadAccountDocument(request: Request, env: Env, id: string, kin
   const now = new Date().toISOString();
   try {
     await env.DRIVER_DOCUMENTS.put(`applications/${id}/${kind}`, file, {
-      httpMetadata: { contentType: file.type, contentDisposition: `attachment; filename=\"${filename}\"` },
+      httpMetadata: { contentType: file.type, contentDisposition: `inline; filename=\"${filename}\"` },
     });
     if (kind === "cdl") {
       await env.DB.prepare(
@@ -577,7 +577,7 @@ async function downloadMedicalCard(request: Request, env: Env, id: string): Prom
   if (!object) return errorResponse("Medical card not found.", 404);
   const headers = new Headers({ "cache-control": "private, no-store" });
   object.writeHttpMetadata(headers);
-  headers.set("content-disposition", `attachment; filename=\"medical-card.${cdlExtension(object.httpMetadata?.contentType)}\"`);
+  headers.set("content-disposition", `inline; filename=\"medical-card.${cdlExtension(object.httpMetadata?.contentType)}\"`);
   return new Response(object.body, { headers });
 }
 
