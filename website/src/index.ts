@@ -485,15 +485,11 @@ async function uploadApplicationDocument(request: Request, env: Env, id: string,
   const editToken = form.get("editToken");
   const consent = form.get("consent");
   const file = form.get("file");
-  const expiration = typeof form.get("expiration") === "string" ? String(form.get("expiration")) : "";
   if (typeof editToken !== "string" || consent !== "yes" || !(file instanceof File)) {
     return errorResponse(`Please confirm consent and choose a ${documentLabel} file.`, 400);
   }
   if (!CDL_CONTENT_TYPES.has(file.type) || file.size === 0 || file.size > MAX_CDL_SIZE_BYTES) {
     return errorResponse(`Upload a JPG, PNG, or PDF ${documentLabel} file up to 5 MB.`, 400);
-  }
-  if (kind === "medical-card" && !/^\d{4}-\d{2}-\d{2}$/u.test(expiration)) {
-    return errorResponse("Enter the medical card expiration date.", 400);
   }
   const tokenHash = await sha256(editToken);
   const application = await env.DB.prepare(
@@ -514,8 +510,8 @@ async function uploadApplicationDocument(request: Request, env: Env, id: string,
       ).bind(now, id, tokenHash).run();
     } else {
       await env.DB.prepare(
-        "UPDATE applications SET medical_card_uploaded_at = ?1, medical_card_expiration = ?2, updated_at = ?1 WHERE id = ?3 AND edit_token_hash = ?4",
-      ).bind(now, expiration, id, tokenHash).run();
+        "UPDATE applications SET medical_card_uploaded_at = ?1, updated_at = ?1 WHERE id = ?2 AND edit_token_hash = ?3",
+      ).bind(now, id, tokenHash).run();
     }
     return json({ ok: true, uploadedAt: now });
   } catch {
@@ -535,8 +531,8 @@ async function requestMedicalCardEmail(request: Request, env: Env, applicationId
   const firstName = application.full_name.trim().split(/\s+/u)[0] || "there";
   const portalUrl = "https://worldwidecargoexpressllc.com/account/";
   const safePortalUrl = escapeHtml(portalUrl);
-  const html = `<!doctype html><html><body style="margin:0;background:#f3f6f9;padding:32px 16px;color:#13263c;font-family:Arial,sans-serif"><table role="presentation" style="width:100%;max-width:620px;margin:auto;background:#fff;border-collapse:collapse"><tr><td style="height:6px;background:#d31932"></td></tr><tr><td style="padding:38px"><p style="margin:0 0 10px;color:#d31932;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase">Worldwide Cargo Express</p><h1 style="margin:0 0 18px;color:#062b5a;font-size:28px">Medical card requested</h1><p style="margin:0 0 18px;color:#4c5e72;font-size:16px;line-height:1.65">Hi ${escapeHtml(firstName)}, we need a clear copy of your current DOT medical card to continue reviewing your driver application.</p><ol style="margin:0 0 24px;padding-left:22px;color:#4c5e72;font-size:16px;line-height:1.8"><li>Sign in to your Worldwide Cargo Express account portal.</li><li>Find your driver application.</li><li>Under DOT medical card, enter the expiration date and choose a JPG, PNG, or PDF file.</li><li>Confirm consent and select Upload.</li></ol><p style="margin:0 0 28px"><a href="${safePortalUrl}" style="display:inline-block;padding:14px 22px;background:#d31932;color:#fff;font-size:15px;font-weight:700;text-decoration:none">Open account portal</a></p><p style="margin:0;color:#66768a;font-size:13px;line-height:1.6">Sign in with ${escapeHtml(email)}. If you forgot your password, use the password-reset link on the sign-in page. If your account is not activated yet, finish the activation step from your application confirmation.</p></td></tr></table></body></html>`;
-  const text = `Medical card requested\n\nHi ${firstName},\n\nWe need a clear copy of your current DOT medical card to continue reviewing your driver application.\n\n1. Sign in to your Worldwide Cargo Express account portal: ${portalUrl}\n2. Find your driver application.\n3. Under DOT medical card, enter the expiration date and choose a JPG, PNG, or PDF file.\n4. Confirm consent and select Upload.\n\nSign in with ${email}. If you forgot your password, use the password-reset link on the sign-in page. If your account is not activated yet, finish the activation step from your application confirmation.`;
+  const html = `<!doctype html><html><body style="margin:0;background:#f3f6f9;padding:32px 16px;color:#13263c;font-family:Arial,sans-serif"><table role="presentation" style="width:100%;max-width:620px;margin:auto;background:#fff;border-collapse:collapse"><tr><td style="height:6px;background:#d31932"></td></tr><tr><td style="padding:38px"><p style="margin:0 0 10px;color:#d31932;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase">Worldwide Cargo Express</p><h1 style="margin:0 0 18px;color:#062b5a;font-size:28px">Medical card requested</h1><p style="margin:0 0 18px;color:#4c5e72;font-size:16px;line-height:1.65">Hi ${escapeHtml(firstName)}, we need a clear copy of your current DOT medical card to continue reviewing your driver application.</p><ol style="margin:0 0 24px;padding-left:22px;color:#4c5e72;font-size:16px;line-height:1.8"><li>Sign in to your Worldwide Cargo Express account portal.</li><li>Find your driver application.</li><li>Under DOT medical card, choose a JPG, PNG, or PDF file.</li><li>Confirm consent and select Upload.</li></ol><p style="margin:0 0 28px"><a href="${safePortalUrl}" style="display:inline-block;padding:14px 22px;background:#d31932;color:#fff;font-size:15px;font-weight:700;text-decoration:none">Open account portal</a></p><p style="margin:0;color:#66768a;font-size:13px;line-height:1.6">Sign in with ${escapeHtml(email)}. If you forgot your password, use the password-reset link on the sign-in page. If your account is not activated yet, finish the activation step from your application confirmation.</p></td></tr></table></body></html>`;
+  const text = `Medical card requested\n\nHi ${firstName},\n\nWe need a clear copy of your current DOT medical card to continue reviewing your driver application.\n\n1. Sign in to your Worldwide Cargo Express account portal: ${portalUrl}\n2. Find your driver application.\n3. Under DOT medical card, choose a JPG, PNG, or PDF file.\n4. Confirm consent and select Upload.\n\nSign in with ${email}. If you forgot your password, use the password-reset link on the sign-in page. If your account is not activated yet, finish the activation step from your application confirmation.`;
   try {
     await sendEmail(env, {
       to: email,
@@ -573,13 +569,9 @@ async function uploadAccountDocument(request: Request, env: Env, id: string, kin
   try { form = await request.formData(); } catch { return errorResponse("Choose a valid document to upload.", 400); }
   const file = form.get("file");
   const consent = form.get("consent");
-  const expiration = typeof form.get("expiration") === "string" ? String(form.get("expiration")) : "";
   if (consent !== "yes" || !(file instanceof File)) return errorResponse("Confirm consent and choose a document.", 400);
   if (!CDL_CONTENT_TYPES.has(file.type) || file.size === 0 || file.size > MAX_CDL_SIZE_BYTES) {
     return errorResponse("Upload a JPG, PNG, or PDF up to 5 MB.", 400);
-  }
-  if (kind === "medical-card" && !/^\d{4}-\d{2}-\d{2}$/u.test(expiration)) {
-    return errorResponse("Enter the medical card expiration date.", 400);
   }
   const application = await env.DB.prepare(
     "SELECT id FROM applications WHERE id = ?1 AND account_id = ?2 AND status = 'submitted' LIMIT 1",
@@ -598,8 +590,8 @@ async function uploadAccountDocument(request: Request, env: Env, id: string, kin
       ).bind(now, id, account.id).run();
     } else {
       await env.DB.prepare(
-        "UPDATE applications SET medical_card_uploaded_at = ?1, medical_card_expiration = ?2, updated_at = ?1 WHERE id = ?3 AND account_id = ?4",
-      ).bind(now, expiration, id, account.id).run();
+        "UPDATE applications SET medical_card_uploaded_at = ?1, updated_at = ?1 WHERE id = ?2 AND account_id = ?3",
+      ).bind(now, id, account.id).run();
     }
     return json({ ok: true, uploadedAt: now });
   } catch {

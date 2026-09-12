@@ -225,18 +225,6 @@
       wrap.className = "document-upload-group";
       const heading = document.createElement("strong");
       heading.textContent = label;
-      let expiration;
-      if (kind === "medical-card") {
-        expiration = document.createElement("input");
-        expiration.className = "document-input";
-        expiration.type = "date";
-        expiration.setAttribute("aria-label", "Medical card expiration date");
-        expiration.value = state.answers.medical_card_expiration || "";
-        expiration.addEventListener("input", () => {
-          state.answers.medical_card_expiration = expiration.value;
-          persist();
-        });
-      }
       const input = document.createElement("input");
       input.className = "document-input";
       input.type = "file";
@@ -244,7 +232,7 @@
       input.setAttribute("aria-label", `Upload ${label}`);
       const note = document.createElement("p");
       note.className = "input-note";
-      note.textContent = kind === "medical-card" ? "Enter the expiration date, then choose a JPG, PNG, or PDF up to 5 MB." : "Choose a JPG, PNG, or PDF up to 5 MB.";
+      note.textContent = "Choose a JPG, PNG, or PDF up to 5 MB.";
       const status = document.createElement("p");
       status.className = "input-note document-status";
       if (state.answers[`${kind}_uploaded`] === "yes") status.textContent = `${label} uploaded.`;
@@ -252,15 +240,12 @@
         const file = input.files?.[0];
         if (!file) return;
         if (!checkbox.checked) { status.textContent = "Please confirm consent before uploading."; input.value = ""; return; }
-        if (expiration && !expiration.value) { status.textContent = "Enter the medical card expiration date first."; input.value = ""; expiration.focus(); return; }
         if (file.size > 5 * 1024 * 1024) { status.textContent = "Choose a file smaller than 5 MB."; input.value = ""; return; }
         const data = new FormData();
         data.append("editToken", state.editToken);
         data.append("consent", "yes");
         data.append("file", file);
-        if (expiration) data.append("expiration", expiration.value);
         input.disabled = true;
-        if (expiration) expiration.disabled = true;
         ui.next.disabled = true;
         status.textContent = "Uploading securely…";
         try {
@@ -273,11 +258,9 @@
         } catch (error) {
           status.textContent = error.message || "Upload failed. Please try again.";
           input.disabled = false;
-          if (expiration) expiration.disabled = false;
         } finally { ui.next.disabled = false; }
       });
       wrap.append(heading);
-      if (expiration) wrap.append(expiration);
       wrap.append(input, note, status);
       return wrap;
     }
