@@ -1,3 +1,3 @@
 ADMIN_PASSWORD=choose-a-strong-local-password
 AUTH_SECRET=choose-a-long-random-secret
-PUBLIC_ORIGINS=http://localhost:8787,https://worldwidecargoexpressllc.com,https://www.worldwidecargoexpressllc.com
+PUBLIC_ORIGINS=http://localhost:8787,https://edgeformmedia-pixel.github.io,https://worldwidecargoexpressllc.com,https://www.worldwidecargoexpressllc.com

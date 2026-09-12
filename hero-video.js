@@ -4,11 +4,11 @@
   if (!video || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
   const sources = [
-    "/worldwidecargotruckingllc.com/assets/hero-1.mp4",
-    "/worldwidecargotruckingllc.com/assets/hero-2.mp4",
-    "/worldwidecargotruckingllc.com/assets/hero-3.mp4",
-    "/worldwidecargotruckingllc.com/assets/hero-4.mp4",
-    "/worldwidecargotruckingllc.com/assets/hero-5.mp4",
+    "assets/hero-1.mp4",
+    "assets/hero-2.mp4",
+    "assets/hero-3.mp4",
+    "assets/hero-4.mp4",
+    "assets/hero-5.mp4",
   ];
   let current = 0;
 

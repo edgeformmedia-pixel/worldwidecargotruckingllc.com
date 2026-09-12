@@ -338,7 +338,7 @@
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to activate your account.");
-      window.location.assign("/worldwidecargotruckingllc.com/account/index.html");
+      window.location.assign("../account/index.html");
     } catch (error) {
       ui.accountError.textContent = error.message;
       button.disabled = false;

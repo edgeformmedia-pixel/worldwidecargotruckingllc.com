@@ -19,7 +19,7 @@
     }
   ],
   "vars": {
-    "PUBLIC_ORIGINS": "https://edgeformmedia-pixel.github.io"
+    "PUBLIC_ORIGINS": "https://edgeformmedia-pixel.github.io,https://worldwidecargoexpressllc.com,https://www.worldwidecargoexpressllc.com"
   },
   "observability": {
     "enabled": true,

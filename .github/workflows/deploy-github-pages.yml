@@ -28,21 +28,10 @@ jobs:
         uses: actions/checkout@v4
       - name: Configure Pages
         uses: actions/configure-pages@v5
-      - name: Prepare the project-site paths
-        run: |
-          mkdir .pages-site
-          cp -R website/dist/. .pages-site/
-          find .pages-site -name '*.html' -exec sed -i \
-            -e 's#href="/#href="/worldwidecargotruckingllc.com/#g' \
-            -e 's#src="/#src="/worldwidecargotruckingllc.com/#g' \
-            -e 's#poster="/#poster="/worldwidecargotruckingllc.com/#g' {} +
-          find .pages-site -name '*.js' -exec sed -i \
-            -e 's#"/assets/#"/worldwidecargotruckingllc.com/assets/#g' \
-            -e 's#"/account/#"/worldwidecargotruckingllc.com/account/#g' {} +
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .pages-site
+          path: website/dist
       - name: Publish site
         id: deployment
         uses: actions/deploy-pages@v4

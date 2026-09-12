@@ -59,7 +59,7 @@
     event.preventDefault(); accountError.textContent = ""; const button = accountForm.querySelector("button"); button.disabled = true;
     try {
       const response = await fetch("/api/account/activate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ source: "quote", sourceId: state.id, editToken: state.editToken, password: document.querySelector("#quotePassword").value, confirmPassword: document.querySelector("#quoteConfirmPassword").value }) });
-      const data = await response.json(); if (!response.ok) throw new Error(data.error || "Unable to activate account."); window.location.assign("/worldwidecargotruckingllc.com/account/index.html");
+      const data = await response.json(); if (!response.ok) throw new Error(data.error || "Unable to activate account."); window.location.assign("../account/index.html");
     } catch (error) { accountError.textContent = error.message; button.disabled = false; }
   });
   document.querySelectorAll('input[type="date"]').forEach((input) => { input.min = new Date().toISOString().slice(0, 10); });
