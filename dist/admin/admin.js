@@ -59,6 +59,9 @@
       const stage = applicationStage(app);
       if (app.cdl_document_uploaded_at) actions.append(documentLink(app, "cdl", "View CDL"));
       if (app.medical_card_uploaded_at) actions.append(documentLink(app, "medical-card", "View medical card"));
+      const requestMedical = actionButton(isExpired(app) ? "Request updated medical card" : "Request medical card", "", "request-medical-card", Boolean(app.medical_card_uploaded_at) && !isExpired(app));
+      if (!app.email) { requestMedical.disabled = true; requestMedical.title = "Applicant email is missing"; }
+      actions.append(requestMedical);
       if (stage === "phone_screen") actions.append(actionButton("Phone call complete", "next", "request-docs"));
       if (stage === "docs_requested") {
         actions.append(actionButton("Documents complete", "next", "docs-complete", !app.cdl_document_uploaded_at || !app.medical_card_uploaded_at));
@@ -127,6 +130,13 @@
       if (button.dataset.action === "docs-complete") await patchApplication(app.id, { stage: "docs_received" });
       if (button.dataset.action === "archive") await patchApplication(app.id, { archive: true });
       if (button.dataset.action === "restore") await patchApplication(app.id, { archive: false });
+      if (button.dataset.action === "request-medical-card") {
+        const response = await fetch(`/api/admin/applications/${app.id}/request-medical-card`, { method: "POST" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Unable to send the medical card request.");
+        alert(data.message || `Medical card request sent to ${app.email}.`);
+        button.disabled = false;
+      }
       if (button.dataset.action === "mark-sent") { sendTarget = app; ui.sendDriverName.textContent = `Record who received ${app.full_name || "this driver"}’s CDL and medical card.`; ui.sentTo.value = app.sent_to || ""; ui.sendError.textContent = ""; ui.sendDialog.showModal(); button.disabled = false; }
     } catch (error) { alert(error.message || "Unable to update applicant."); button.disabled = false; }
   }

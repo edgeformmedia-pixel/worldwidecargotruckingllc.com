@@ -476,38 +476,78 @@ async function updateApplication(request: Request, env: Env, id: string): Promis
   return json({ ok: true, savedAt: now });
 }
 
-async function uploadCdl(request: Request, env: Env, id: string): Promise<Response> {
+async function uploadApplicationDocument(request: Request, env: Env, id: string, kind: "cdl" | "medical-card"): Promise<Response> {
+  const documentLabel = kind === "cdl" ? "CDL" : "medical card";
   const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (contentLength > MAX_CDL_SIZE_BYTES + 128_000) return errorResponse("The CDL file must be 5 MB or smaller.", 413);
+  if (contentLength > MAX_CDL_SIZE_BYTES + 128_000) return errorResponse(`The ${documentLabel} file must be 5 MB or smaller.`, 413);
   let form: FormData;
-  try { form = await request.formData(); } catch { return errorResponse("Choose a valid CDL file to upload.", 400); }
+  try { form = await request.formData(); } catch { return errorResponse(`Choose a valid ${documentLabel} file to upload.`, 400); }
   const editToken = form.get("editToken");
   const consent = form.get("consent");
   const file = form.get("file");
+  const expiration = typeof form.get("expiration") === "string" ? String(form.get("expiration")) : "";
   if (typeof editToken !== "string" || consent !== "yes" || !(file instanceof File)) {
-    return errorResponse("Please confirm consent and choose a CDL file.", 400);
+    return errorResponse(`Please confirm consent and choose a ${documentLabel} file.`, 400);
   }
   if (!CDL_CONTENT_TYPES.has(file.type) || file.size === 0 || file.size > MAX_CDL_SIZE_BYTES) {
-    return errorResponse("Upload a JPG, PNG, or PDF CDL file up to 5 MB.", 400);
+    return errorResponse(`Upload a JPG, PNG, or PDF ${documentLabel} file up to 5 MB.`, 400);
+  }
+  if (kind === "medical-card" && !/^\d{4}-\d{2}-\d{2}$/u.test(expiration)) {
+    return errorResponse("Enter the medical card expiration date.", 400);
   }
   const tokenHash = await sha256(editToken);
   const application = await env.DB.prepare(
     "SELECT id FROM applications WHERE id = ?1 AND edit_token_hash = ?2 AND status = 'draft' LIMIT 1",
   ).bind(id, tokenHash).first<{ id: string }>();
   if (!application) return errorResponse("Application draft not found.", 404);
-  const objectKey = `applications/${id}/cdl`;
+  const extension = cdlExtension(file.type);
+  const filename = kind === "cdl" ? `cdl-license.${extension}` : `medical-card.${extension}`;
+  const objectKey = `applications/${id}/${kind}`;
   try {
     await env.DRIVER_DOCUMENTS.put(objectKey, file, {
-      httpMetadata: { contentType: file.type, contentDisposition: `inline; filename=\"cdl-license.${cdlExtension(file.type)}\"` },
+      httpMetadata: { contentType: file.type, contentDisposition: `inline; filename=\"${filename}\"` },
     });
     const now = new Date().toISOString();
-    await env.DB.prepare(
-      "UPDATE applications SET cdl_document_uploaded_at = ?1, cdl_processing_consent_at = ?1, updated_at = ?1 WHERE id = ?2 AND edit_token_hash = ?3",
-    ).bind(now, id, tokenHash).run();
+    if (kind === "cdl") {
+      await env.DB.prepare(
+        "UPDATE applications SET cdl_document_uploaded_at = ?1, cdl_processing_consent_at = ?1, updated_at = ?1 WHERE id = ?2 AND edit_token_hash = ?3",
+      ).bind(now, id, tokenHash).run();
+    } else {
+      await env.DB.prepare(
+        "UPDATE applications SET medical_card_uploaded_at = ?1, medical_card_expiration = ?2, updated_at = ?1 WHERE id = ?3 AND edit_token_hash = ?4",
+      ).bind(now, expiration, id, tokenHash).run();
+    }
     return json({ ok: true, uploadedAt: now });
   } catch {
     return errorResponse("We couldn’t upload that file. Please try again.", 500);
   }
+}
+
+async function requestMedicalCardEmail(request: Request, env: Env, applicationId: string): Promise<Response> {
+  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const application = await env.DB.prepare(
+    "SELECT id, full_name, email FROM applications WHERE id = ?1 AND status = 'submitted' LIMIT 1",
+  ).bind(applicationId).first<Pick<ApplicationRow, "id" | "full_name" | "email">>();
+  if (!application) return errorResponse("Application not found.", 404);
+  const email = application.email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) return errorResponse("This applicant does not have a valid email address.", 400);
+
+  const firstName = application.full_name.trim().split(/\s+/u)[0] || "there";
+  const portalUrl = "https://worldwidecargoexpressllc.com/account/";
+  const safePortalUrl = escapeHtml(portalUrl);
+  const html = `<!doctype html><html><body style="margin:0;background:#f3f6f9;padding:32px 16px;color:#13263c;font-family:Arial,sans-serif"><table role="presentation" style="width:100%;max-width:620px;margin:auto;background:#fff;border-collapse:collapse"><tr><td style="height:6px;background:#d31932"></td></tr><tr><td style="padding:38px"><p style="margin:0 0 10px;color:#d31932;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase">Worldwide Cargo Express</p><h1 style="margin:0 0 18px;color:#062b5a;font-size:28px">Medical card requested</h1><p style="margin:0 0 18px;color:#4c5e72;font-size:16px;line-height:1.65">Hi ${escapeHtml(firstName)}, we need a clear copy of your current DOT medical card to continue reviewing your driver application.</p><ol style="margin:0 0 24px;padding-left:22px;color:#4c5e72;font-size:16px;line-height:1.8"><li>Sign in to your Worldwide Cargo Express account portal.</li><li>Find your driver application.</li><li>Under DOT medical card, enter the expiration date and choose a JPG, PNG, or PDF file.</li><li>Confirm consent and select Upload.</li></ol><p style="margin:0 0 28px"><a href="${safePortalUrl}" style="display:inline-block;padding:14px 22px;background:#d31932;color:#fff;font-size:15px;font-weight:700;text-decoration:none">Open account portal</a></p><p style="margin:0;color:#66768a;font-size:13px;line-height:1.6">Sign in with ${escapeHtml(email)}. If you forgot your password, use the password-reset link on the sign-in page. If your account is not activated yet, finish the activation step from your application confirmation.</p></td></tr></table></body></html>`;
+  const text = `Medical card requested\n\nHi ${firstName},\n\nWe need a clear copy of your current DOT medical card to continue reviewing your driver application.\n\n1. Sign in to your Worldwide Cargo Express account portal: ${portalUrl}\n2. Find your driver application.\n3. Under DOT medical card, enter the expiration date and choose a JPG, PNG, or PDF file.\n4. Confirm consent and select Upload.\n\nSign in with ${email}. If you forgot your password, use the password-reset link on the sign-in page. If your account is not activated yet, finish the activation step from your application confirmation.`;
+  try {
+    await sendEmail(env, {
+      to: email,
+      subject: "Please upload your DOT medical card",
+      html,
+      text,
+    });
+  } catch {
+    return errorResponse("We couldn’t send the medical card request. Please try again.", 503);
+  }
+  return json({ ok: true, message: `Medical card request sent to ${email}.` });
 }
 
 async function downloadCdl(request: Request, env: Env, id: string): Promise<Response> {
@@ -1022,8 +1062,10 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (request.method === "POST" && path === "/api/applications") return createApplication(request, env);
-  const cdlUploadMatch = path.match(/^\/api\/applications\/([0-9a-f-]{36})\/documents\/cdl$/u);
-  if (cdlUploadMatch && request.method === "POST") return uploadCdl(request, env, cdlUploadMatch[1]);
+  const applicationDocumentUploadMatch = path.match(/^\/api\/applications\/([0-9a-f-]{36})\/documents\/(cdl|medical-card)$/u);
+  if (applicationDocumentUploadMatch && request.method === "POST") {
+    return uploadApplicationDocument(request, env, applicationDocumentUploadMatch[1], applicationDocumentUploadMatch[2] as "cdl" | "medical-card");
+  }
   const applicationMatch = path.match(/^\/api\/applications\/([0-9a-f-]{36})(?:\/(submit))?$/u);
   if (applicationMatch && request.method === "PATCH" && !applicationMatch[2]) {
     return updateApplication(request, env, applicationMatch[1]);
@@ -1065,6 +1107,8 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   const adminApplicationMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})$/u);
   if (adminApplicationMatch && request.method === "PATCH") return updateRecruitingApplication(request, env, adminApplicationMatch[1]);
   if (adminApplicationMatch && request.method === "DELETE") return deleteApplication(request, env, adminApplicationMatch[1]);
+  const medicalCardRequestMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/request-medical-card$/u);
+  if (medicalCardRequestMatch && request.method === "POST") return requestMedicalCardEmail(request, env, medicalCardRequestMatch[1]);
   const cdlDownloadMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/documents\/cdl$/u);
   if (cdlDownloadMatch && request.method === "GET") return downloadCdl(request, env, cdlDownloadMatch[1]);
   const medicalCardDownloadMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/documents\/medical-card$/u);

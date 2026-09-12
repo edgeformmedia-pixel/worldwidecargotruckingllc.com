@@ -9,3 +9,6 @@
 .document-consent { display: flex; gap: 10px; align-items: flex-start; margin-top: 20px; color: #31445a; font-size: .9rem; line-height: 1.45; }
 .document-consent input { width: 18px; height: 18px; margin: 1px 0 0; flex: 0 0 auto; }
 .document-input { display: block; width: 100%; margin-top: 14px; padding: 12px; border: 1px solid #c8d3df; border-radius: 4px; background: #fff; }
+.document-upload-group { margin-top: 18px; padding: 16px; border: 1px solid #dce3ea; border-radius: 4px; background: #f8fafc; }
+.document-upload-group strong { display: block; color: #062b5a; }
+.document-status { min-height: 20px; margin-bottom: 0; font-weight: 700; }
