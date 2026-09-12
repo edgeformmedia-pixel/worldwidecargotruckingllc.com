@@ -152,7 +152,7 @@
     ui.back.hidden = true;
     ui.label.textContent = "First, choose the opportunity that fits you.";
     ui.title.textContent = "Are you an owner-operator or a company driver?";
-    ui.help.textContent = "We’ll tailor the next few questions to your selection.";
+    ui.help.textContent = "By entering your information, you agree that Worldwide Cargo Express may contact you about this driver job opportunity. We’ll tailor the next few questions to your selection.";
     ui.next.hidden = true;
     makeChoices(choices.driverType, "", async (value, button) => {
       document.querySelectorAll(".choice").forEach((item) => item.classList.remove("selected"));
