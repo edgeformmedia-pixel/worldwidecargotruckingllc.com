@@ -1085,15 +1085,16 @@ async function sendOutboundEmail(request: Request, env: Env): Promise<Response> 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(senderEmail)) return errorResponse("The company sending address is not configured.", 503);
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
-  const from = `${profile.display_name} <${senderEmail}>`;
+  // The authenticated employee always owns the visible sender name. Profiles only select the sending address.
+  const from = `${principal.fullName} <${senderEmail}>`;
   const replyTo = settings?.default_reply_to ?? "";
   try {
     const providerMessageId = await sendEmail(env, { to: recipient, subject, text: message, html: emailShell(subject, message), from, replyTo });
     await env.DB.prepare("INSERT INTO outbound_emails (id, admin_user_id, sender_profile_id, sender_name, sender_email, reply_to, recipient_email, subject, body_text, provider_message_id, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'sent', ?11)")
-      .bind(id, principal.id, profile.id, profile.display_name, senderEmail, replyTo, recipient, subject, message, providerMessageId, now).run();
+      .bind(id, principal.id, profile.id, principal.fullName, senderEmail, replyTo, recipient, subject, message, providerMessageId, now).run();
   } catch {
     await env.DB.prepare("INSERT INTO outbound_emails (id, admin_user_id, sender_profile_id, sender_name, sender_email, reply_to, recipient_email, subject, body_text, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'failed', ?10)")
-      .bind(id, principal.id, profile.id, profile.display_name, senderEmail, replyTo, recipient, subject, message, now).run();
+      .bind(id, principal.id, profile.id, principal.fullName, senderEmail, replyTo, recipient, subject, message, now).run();
     return errorResponse("We couldn’t send that email. Please try again.", 503);
   }
   await auditAdmin(env, principal, "email.sent", "outbound_email", id, recipient);
