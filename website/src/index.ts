@@ -133,6 +133,7 @@ type EmailSenderProfileRow = {
   label: string;
   display_name: string;
   active: number;
+  sender_email: string;
 };
 
 type EmailSettingsRow = {
@@ -1039,8 +1040,8 @@ async function outboundEmailData(request: Request, env: Env): Promise<Response> 
   if (!principal) return errorResponse("Unauthorized.", 401);
   const [profiles, settings, messages] = await Promise.all([
     principal.bootstrap || principal.role === "master"
-      ? env.DB.prepare("SELECT id, label, display_name, active FROM email_sender_profiles WHERE active = 1 ORDER BY label").all<EmailSenderProfileRow>()
-      : env.DB.prepare("SELECT p.id, p.label, p.display_name, p.active FROM email_sender_profiles p JOIN admin_users u ON u.sender_profile_id = p.id WHERE u.id = ?1 AND p.active = 1").bind(principal.id).all<EmailSenderProfileRow>(),
+      ? env.DB.prepare("SELECT id, label, display_name, active, sender_email FROM email_sender_profiles WHERE active = 1 ORDER BY label").all<EmailSenderProfileRow>()
+      : env.DB.prepare("SELECT p.id, p.label, p.display_name, p.active, p.sender_email FROM email_sender_profiles p JOIN admin_users u ON u.sender_profile_id = p.id WHERE u.id = ?1 AND p.active = 1").bind(principal.id).all<EmailSenderProfileRow>(),
     env.DB.prepare("SELECT default_sender_profile_id, default_reply_to FROM email_settings WHERE id = 1").first<EmailSettingsRow>(),
     env.DB.prepare("SELECT e.id, e.sender_name, e.sender_email, e.reply_to, e.recipient_email, e.subject, e.body_text, e.status, e.created_at, u.full_name AS employee_name FROM outbound_emails e LEFT JOIN admin_users u ON u.id = e.admin_user_id ORDER BY e.created_at DESC LIMIT 100").all<OutboundEmailRow>(),
   ]);
@@ -1077,10 +1078,10 @@ async function sendOutboundEmail(request: Request, env: Env): Promise<Response> 
   if (!message || message.length > 10_000) return errorResponse("Write a message up to 10,000 characters.", 400);
   const settings = await env.DB.prepare("SELECT default_sender_profile_id, default_reply_to FROM email_settings WHERE id = 1").first<EmailSettingsRow>();
   const selectedProfileId = profileId || settings?.default_sender_profile_id || "general";
-  const profile = await env.DB.prepare("SELECT id, label, display_name, active FROM email_sender_profiles WHERE id = ?1 AND active = 1 LIMIT 1").bind(selectedProfileId).first<EmailSenderProfileRow>();
+  const profile = await env.DB.prepare("SELECT id, label, display_name, active, sender_email FROM email_sender_profiles WHERE id = ?1 AND active = 1 LIMIT 1").bind(selectedProfileId).first<EmailSenderProfileRow>();
   if (!profile) return errorResponse("Choose an available sender.", 400);
   if (!isMaster(principal) && profile.id !== (await env.DB.prepare("SELECT sender_profile_id FROM admin_users WHERE id = ?1").bind(principal.id).first<{ sender_profile_id: string | null }>())?.sender_profile_id) return errorResponse("Use the email identity assigned to you.", 403);
-  const senderEmail = emailAddress(env.EMAIL_FROM);
+  const senderEmail = profile.sender_email || emailAddress(env.EMAIL_FROM);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(senderEmail)) return errorResponse("The company sending address is not configured.", 503);
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
@@ -1193,9 +1194,10 @@ async function createAdminUser(request: Request, env: Env): Promise<Response> {
   const fullName = typeof body?.fullName === "string" ? body.fullName.trim() : "";
   const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
   const senderProfileId = typeof body?.senderProfileId === "string" ? body.senderProfileId.trim() : "";
+  const senderEmail = typeof body?.senderEmail === "string" ? body.senderEmail.trim().toLowerCase() : "";
   if (!fullName || fullName.length > 120) return errorResponse("Enter the employee’s full name.", 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email) || email.length > 180) return errorResponse("Enter a valid email address.", 400);
-  if (senderProfileId) {
+  if (senderProfileId && senderProfileId !== "other") {
     const profile = await env.DB.prepare("SELECT id FROM email_sender_profiles WHERE id = ?1 AND active = 1").bind(senderProfileId).first<{ id: string }>();
     if (!profile) return errorResponse("Choose an available email identity.", 400);
   }
@@ -1203,15 +1205,25 @@ async function createAdminUser(request: Request, env: Env): Promise<Response> {
   if (existing) return errorResponse("An administrator already uses this email.", 409);
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
+  const profileId = senderProfileId === "other" || !senderProfileId ? `employee-${id}` : senderProfileId;
+  const outboundAddress = senderProfileId === "other" ? senderEmail : emailAddress(env.EMAIL_FROM);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(outboundAddress) || outboundAddress.length > 180) return errorResponse("Enter the employee’s send-as email address.", 400);
+  if (senderProfileId === "other") {
+    await env.DB.prepare("INSERT INTO email_sender_profiles (id, label, display_name, sender_email, active, created_at, updated_at) VALUES (?1, ?2, ?2, ?3, 1, ?4, ?4)")
+      .bind(profileId, fullName, outboundAddress, now).run();
+  } else if (!senderProfileId) {
+    await env.DB.prepare("INSERT INTO email_sender_profiles (id, label, display_name, sender_email, active, created_at, updated_at) VALUES (?1, ?2, ?2, ?3, 1, ?4, ?4)")
+      .bind(profileId, fullName, outboundAddress, now).run();
+  }
   await env.DB.prepare(
     "INSERT INTO admin_users (id, full_name, email, status, role, sender_profile_id, created_at, updated_at) VALUES (?1, ?2, ?3, 'invited', 'employee', ?4, ?5, ?5)",
-  ).bind(id, fullName, email, senderProfileId || null, now).run();
+  ).bind(id, fullName, email, profileId, now).run();
   const user = await env.DB.prepare("SELECT * FROM admin_users WHERE id = ?1").bind(id).first<AdminUserRow>();
   if (!user) return errorResponse("Unable to create administrator.", 500);
   try {
     await issueAdminAccessToken(request, env, user, "invite");
   } catch {
-    await env.DB.prepare("DELETE FROM admin_users WHERE id = ?1").bind(id).run();
+    await env.DB.batch([env.DB.prepare("DELETE FROM admin_users WHERE id = ?1").bind(id), ...(profileId.startsWith("employee-") ? [env.DB.prepare("DELETE FROM email_sender_profiles WHERE id = ?1").bind(profileId)] : [])]);
     return errorResponse("The invitation email could not be sent. No account was created.", 503);
   }
   await auditAdmin(env, principal, "admin.invited", "admin_user", id, email);
