@@ -118,6 +118,7 @@ type AdminUserRow = {
   updated_at: string;
   role: "master" | "employee";
   sender_profile_id: string | null;
+  email_profiles?: Array<EmailSenderProfileRow & { is_default: boolean }>;
 };
 
 type AdminPrincipal = {
@@ -1031,6 +1032,11 @@ function emailAddress(from: string): string {
   return (match?.[1] ?? from).trim();
 }
 
+function companyEmailLocalPart(fullName: string): string {
+  const local = fullName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/gu, "").replace(/[^a-z0-9]+/gu, ".").replace(/^\.+|\.+$/gu, "");
+  return local || "employee";
+}
+
 function isMaster(principal: AdminPrincipal): boolean {
   return principal.bootstrap || principal.role === "master";
 }
@@ -1041,7 +1047,7 @@ async function outboundEmailData(request: Request, env: Env): Promise<Response> 
   const [profiles, settings, messages] = await Promise.all([
     principal.bootstrap || principal.role === "master"
       ? env.DB.prepare("SELECT id, label, display_name, active, sender_email FROM email_sender_profiles WHERE active = 1 ORDER BY label").all<EmailSenderProfileRow>()
-      : env.DB.prepare("SELECT p.id, p.label, p.display_name, p.active, p.sender_email FROM email_sender_profiles p JOIN admin_users u ON u.sender_profile_id = p.id WHERE u.id = ?1 AND p.active = 1").bind(principal.id).all<EmailSenderProfileRow>(),
+      : env.DB.prepare("SELECT p.id, p.label, p.display_name, p.active, p.sender_email FROM email_sender_profiles p JOIN employee_email_access a ON a.sender_profile_id = p.id WHERE a.admin_user_id = ?1 AND p.active = 1 ORDER BY p.label").bind(principal.id).all<EmailSenderProfileRow>(),
     env.DB.prepare("SELECT default_sender_profile_id, default_reply_to FROM email_settings WHERE id = 1").first<EmailSettingsRow>(),
     env.DB.prepare("SELECT e.id, e.sender_name, e.sender_email, e.reply_to, e.recipient_email, e.subject, e.body_text, e.status, e.created_at, u.full_name AS employee_name FROM outbound_emails e LEFT JOIN admin_users u ON u.id = e.admin_user_id ORDER BY e.created_at DESC LIMIT 100").all<OutboundEmailRow>(),
   ]);
@@ -1080,7 +1086,7 @@ async function sendOutboundEmail(request: Request, env: Env): Promise<Response> 
   const selectedProfileId = profileId || settings?.default_sender_profile_id || "general";
   const profile = await env.DB.prepare("SELECT id, label, display_name, active, sender_email FROM email_sender_profiles WHERE id = ?1 AND active = 1 LIMIT 1").bind(selectedProfileId).first<EmailSenderProfileRow>();
   if (!profile) return errorResponse("Choose an available sender.", 400);
-  if (!isMaster(principal) && profile.id !== (await env.DB.prepare("SELECT sender_profile_id FROM admin_users WHERE id = ?1").bind(principal.id).first<{ sender_profile_id: string | null }>())?.sender_profile_id) return errorResponse("Use the email identity assigned to you.", 403);
+  if (!isMaster(principal) && !(await env.DB.prepare("SELECT 1 FROM employee_email_access WHERE admin_user_id = ?1 AND sender_profile_id = ?2").bind(principal.id, profile.id).first())) return errorResponse("Use an email identity assigned to you.", 403);
   const senderEmail = profile.sender_email || emailAddress(env.EMAIL_FROM);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(senderEmail)) return errorResponse("The company sending address is not configured.", 503);
   const now = new Date().toISOString();
@@ -1181,9 +1187,19 @@ async function adminLogin(request: Request, env: Env): Promise<Response> {
 async function listAdminUsers(request: Request, env: Env): Promise<Response> {
   const principal = await hasAdminSession(request, env);
   if (!principal) return errorResponse("Unauthorized.", 401);
+  if (!isMaster(principal)) return errorResponse("Only the Master Admin can view employee email access.", 403);
   const result = await env.DB.prepare(
     "SELECT id, full_name, email, status, last_login_at, created_at, updated_at, role, sender_profile_id FROM admin_users ORDER BY CASE role WHEN 'master' THEN 0 ELSE 1 END, full_name",
   ).all<AdminUserRow>();
+  const access = await env.DB.prepare("SELECT a.admin_user_id, p.id, p.label, p.display_name, p.active, p.sender_email FROM employee_email_access a JOIN email_sender_profiles p ON p.id = a.sender_profile_id WHERE p.active = 1 ORDER BY p.label").all<EmailSenderProfileRow & { admin_user_id: string }>();
+  const profilesByUser = new Map<string, Array<EmailSenderProfileRow & { is_default: boolean }>>();
+  for (const profile of access.results) {
+    const user = result.results.find((candidate) => candidate.id === profile.admin_user_id);
+    const list = profilesByUser.get(profile.admin_user_id) ?? [];
+    list.push({ id: profile.id, label: profile.label, display_name: profile.display_name, active: profile.active, sender_email: profile.sender_email, is_default: user?.sender_profile_id === profile.id });
+    profilesByUser.set(profile.admin_user_id, list);
+  }
+  for (const user of result.results) user.email_profiles = profilesByUser.get(user.id) ?? [];
   return json({ ok: true, users: result.results, currentUser: principal });
 }
 
@@ -1207,7 +1223,7 @@ async function createAdminUser(request: Request, env: Env): Promise<Response> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const profileId = senderProfileId === "other" || !senderProfileId ? `employee-${id}` : senderProfileId;
-  const outboundAddress = senderProfileId === "other" ? senderEmail : emailAddress(env.EMAIL_FROM);
+  const outboundAddress = senderProfileId === "other" ? senderEmail : !senderProfileId ? `${companyEmailLocalPart(fullName)}@worldwidecargoexpressllc.com` : emailAddress(env.EMAIL_FROM);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(outboundAddress) || outboundAddress.length > 180) return errorResponse("Enter the employee’s send-as email address.", 400);
   if (senderProfileId === "other") {
     await env.DB.prepare("INSERT INTO email_sender_profiles (id, label, display_name, sender_email, active, created_at, updated_at) VALUES (?1, ?2, ?2, ?3, 1, ?4, ?4)")
@@ -1219,6 +1235,7 @@ async function createAdminUser(request: Request, env: Env): Promise<Response> {
   await env.DB.prepare(
     "INSERT INTO admin_users (id, full_name, email, status, role, sender_profile_id, created_at, updated_at) VALUES (?1, ?2, ?3, 'invited', 'employee', ?4, ?5, ?5)",
   ).bind(id, fullName, email, profileId, now).run();
+  await env.DB.prepare("INSERT INTO employee_email_access (admin_user_id, sender_profile_id, created_at) VALUES (?1, ?2, ?3)").bind(id, profileId, now).run();
   const user = await env.DB.prepare("SELECT * FROM admin_users WHERE id = ?1").bind(id).first<AdminUserRow>();
   if (!user) return errorResponse("Unable to create administrator.", 500);
   try {
@@ -1234,6 +1251,7 @@ async function createAdminUser(request: Request, env: Env): Promise<Response> {
 async function resendAdminInvite(request: Request, env: Env, adminId: string): Promise<Response> {
   const principal = await hasAdminSession(request, env);
   if (!principal) return errorResponse("Unauthorized.", 401);
+  if (!isMaster(principal)) return errorResponse("Only the Master Admin can manage employee access.", 403);
   const user = await env.DB.prepare("SELECT * FROM admin_users WHERE id = ?1 AND status = 'invited' LIMIT 1").bind(adminId).first<AdminUserRow>();
   if (!user) return errorResponse("Pending invitation not found.", 404);
   try {
@@ -1244,6 +1262,31 @@ async function resendAdminInvite(request: Request, env: Env, adminId: string): P
   }
   await auditAdmin(env, principal, "admin.invitation_resent", "admin_user", user.id, user.email);
   return json({ ok: true });
+}
+
+async function addEmployeeEmailAccess(request: Request, env: Env, adminId: string): Promise<Response> {
+  const principal = await hasAdminSession(request, env);
+  if (!principal) return errorResponse("Unauthorized.", 401);
+  if (!isMaster(principal)) return errorResponse("Only the Master Admin can manage employee email access.", 403);
+  const employee = await env.DB.prepare("SELECT id FROM admin_users WHERE id = ?1 AND role = 'employee' LIMIT 1").bind(adminId).first<{ id: string }>();
+  if (!employee) return errorResponse("Employee not found.", 404);
+  const body = await readJson(request);
+  const type = typeof body?.type === "string" ? body.type.trim() : "";
+  let profileId = type;
+  const now = new Date().toISOString();
+  if (type === "custom") {
+    const localPart = typeof body?.customLocalPart === "string" ? body.customLocalPart.trim().toLowerCase() : "";
+    if (!/^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/u.test(localPart)) return errorResponse("Enter a valid email name using letters, numbers, dots, hyphens, or underscores.", 400);
+    const senderEmail = `${localPart}@worldwidecargoexpressllc.com`;
+    const existing = await env.DB.prepare("SELECT id FROM email_sender_profiles WHERE sender_email = ?1 LIMIT 1").bind(senderEmail).first<{ id: string }>();
+    profileId = existing?.id ?? `custom-${crypto.randomUUID()}`;
+    if (!existing) await env.DB.prepare("INSERT INTO email_sender_profiles (id, label, display_name, sender_email, active, created_at, updated_at) VALUES (?1, ?2, ?2, ?3, 1, ?4, ?4)").bind(profileId, `${localPart} inbox`, senderEmail, now).run();
+  } else if (type !== "general" && type !== "recruiting") return errorResponse("Choose Dispatcher, Support, or Other.", 400);
+  const profile = await env.DB.prepare("SELECT id FROM email_sender_profiles WHERE id = ?1 AND active = 1 LIMIT 1").bind(profileId).first<{ id: string }>();
+  if (!profile) return errorResponse("That email identity is not available.", 400);
+  await env.DB.prepare("INSERT OR IGNORE INTO employee_email_access (admin_user_id, sender_profile_id, created_at) VALUES (?1, ?2, ?3)").bind(employee.id, profile.id, now).run();
+  await auditAdmin(env, principal, "email.access_added", "admin_user", employee.id, profile.id);
+  return json({ ok: true }, 201);
 }
 
 async function updateAdminUser(request: Request, env: Env, adminId: string): Promise<Response> {
@@ -1464,6 +1507,8 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   if (request.method === "POST" && path === "/api/admin/outbound-email") return sendOutboundEmail(request, env);
   const adminUserInviteMatch = path.match(/^\/api\/admin\/users\/([0-9a-f-]{36})\/invite$/u);
   if (adminUserInviteMatch && request.method === "POST") return resendAdminInvite(request, env, adminUserInviteMatch[1]);
+  const adminUserEmailAccessMatch = path.match(/^\/api\/admin\/users\/([0-9a-f-]{36})\/email-access$/u);
+  if (adminUserEmailAccessMatch && request.method === "POST") return addEmployeeEmailAccess(request, env, adminUserEmailAccessMatch[1]);
   const adminUserMatch = path.match(/^\/api\/admin\/users\/([0-9a-f-]{36})$/u);
   if (adminUserMatch && request.method === "PATCH") return updateAdminUser(request, env, adminUserMatch[1]);
   if (request.method === "GET" && path === "/api/admin/applications") return listApplications(request, env);
