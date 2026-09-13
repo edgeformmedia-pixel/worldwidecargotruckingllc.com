@@ -125,6 +125,31 @@ type AdminPrincipal = {
   bootstrap: boolean;
 };
 
+type EmailSenderProfileRow = {
+  id: string;
+  label: string;
+  display_name: string;
+  active: number;
+};
+
+type EmailSettingsRow = {
+  default_sender_profile_id: string;
+  default_reply_to: string;
+};
+
+type OutboundEmailRow = {
+  id: string;
+  sender_name: string;
+  sender_email: string;
+  reply_to: string;
+  recipient_email: string;
+  subject: string;
+  body_text: string;
+  status: "sent" | "failed";
+  created_at: string;
+  employee_name: string | null;
+};
+
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
@@ -192,17 +217,19 @@ function maskedEmail(email: string): string {
   return `${local.slice(0, 2)}${"•".repeat(Math.max(2, Math.min(6, local.length - 2)))}@${domain}`;
 }
 
-async function sendEmail(env: Env, details: { to: string; subject: string; html: string; text: string }): Promise<void> {
+async function sendEmail(env: Env, details: { to: string; subject: string; html: string; text: string; from?: string; replyTo?: string }): Promise<string | null> {
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
-    body: JSON.stringify({ from: env.EMAIL_FROM, ...details }),
+    body: JSON.stringify({ from: details.from ?? env.EMAIL_FROM, to: details.to, subject: details.subject, html: details.html, text: details.text, ...(details.replyTo ? { reply_to: details.replyTo } : {}) }),
   });
   if (!response.ok) {
     const message = await response.text();
     console.error(JSON.stringify({ message: "email delivery failed", status: response.status, detail: message.slice(0, 500) }));
     throw new Error("Email delivery failed");
   }
+  const data: { id?: string } = await response.json<{ id?: string }>().catch(() => ({}));
+  return typeof data.id === "string" ? data.id : null;
 }
 
 async function auditAdmin(
@@ -995,6 +1022,71 @@ async function adminQuotes(request: Request, env: Env): Promise<Response> {
   return json({ ok: true, quotes: quotes.results, drivers: drivers.results, offers: offers.results });
 }
 
+function emailAddress(from: string): string {
+  const match = from.match(/<([^>]+)>/u);
+  return (match?.[1] ?? from).trim();
+}
+
+async function outboundEmailData(request: Request, env: Env): Promise<Response> {
+  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const [profiles, settings, messages] = await Promise.all([
+    env.DB.prepare("SELECT id, label, display_name, active FROM email_sender_profiles WHERE active = 1 ORDER BY label").all<EmailSenderProfileRow>(),
+    env.DB.prepare("SELECT default_sender_profile_id, default_reply_to FROM email_settings WHERE id = 1").first<EmailSettingsRow>(),
+    env.DB.prepare("SELECT e.id, e.sender_name, e.sender_email, e.reply_to, e.recipient_email, e.subject, e.body_text, e.status, e.created_at, u.full_name AS employee_name FROM outbound_emails e LEFT JOIN admin_users u ON u.id = e.admin_user_id ORDER BY e.created_at DESC LIMIT 100").all<OutboundEmailRow>(),
+  ]);
+  return json({ ok: true, profiles: profiles.results, settings: settings ?? { default_sender_profile_id: "general", default_reply_to: "" }, messages: messages.results });
+}
+
+async function updateOutboundEmailSettings(request: Request, env: Env): Promise<Response> {
+  const principal = await hasAdminSession(request, env);
+  if (!principal) return errorResponse("Unauthorized.", 401);
+  const body = await readJson(request);
+  const profileId = typeof body?.defaultSenderProfileId === "string" ? body.defaultSenderProfileId.trim() : "";
+  const replyTo = typeof body?.defaultReplyTo === "string" ? body.defaultReplyTo.trim().toLowerCase() : "";
+  if (!profileId) return errorResponse("Choose a default sender.", 400);
+  if (replyTo && (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(replyTo) || replyTo.length > 180)) return errorResponse("Enter a valid reply-to email address.", 400);
+  const profile = await env.DB.prepare("SELECT id FROM email_sender_profiles WHERE id = ?1 AND active = 1 LIMIT 1").bind(profileId).first<{ id: string }>();
+  if (!profile) return errorResponse("Choose an available sender.", 400);
+  await env.DB.prepare("UPDATE email_settings SET default_sender_profile_id = ?1, default_reply_to = ?2, updated_at = ?3 WHERE id = 1")
+    .bind(profileId, replyTo, new Date().toISOString()).run();
+  await auditAdmin(env, principal, "email.settings_updated", "email_settings", "1", `${profileId}${replyTo ? `; reply-to=${replyTo}` : ""}`);
+  return json({ ok: true });
+}
+
+async function sendOutboundEmail(request: Request, env: Env): Promise<Response> {
+  const principal = await hasAdminSession(request, env);
+  if (!principal) return errorResponse("Unauthorized.", 401);
+  const body = await readJson(request);
+  const recipient = typeof body?.to === "string" ? body.to.trim().toLowerCase() : "";
+  const subject = typeof body?.subject === "string" ? body.subject.trim() : "";
+  const message = typeof body?.message === "string" ? body.message.trim() : "";
+  const profileId = typeof body?.senderProfileId === "string" ? body.senderProfileId.trim() : "";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(recipient) || recipient.length > 180) return errorResponse("Enter a valid recipient email address.", 400);
+  if (!subject || subject.length > 200) return errorResponse("Enter a subject up to 200 characters.", 400);
+  if (!message || message.length > 10_000) return errorResponse("Write a message up to 10,000 characters.", 400);
+  const settings = await env.DB.prepare("SELECT default_sender_profile_id, default_reply_to FROM email_settings WHERE id = 1").first<EmailSettingsRow>();
+  const selectedProfileId = profileId || settings?.default_sender_profile_id || "general";
+  const profile = await env.DB.prepare("SELECT id, label, display_name, active FROM email_sender_profiles WHERE id = ?1 AND active = 1 LIMIT 1").bind(selectedProfileId).first<EmailSenderProfileRow>();
+  if (!profile) return errorResponse("Choose an available sender.", 400);
+  const senderEmail = emailAddress(env.EMAIL_FROM);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(senderEmail)) return errorResponse("The company sending address is not configured.", 503);
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+  const from = `${profile.display_name} <${senderEmail}>`;
+  const replyTo = settings?.default_reply_to ?? "";
+  try {
+    const providerMessageId = await sendEmail(env, { to: recipient, subject, text: message, html: emailShell(subject, message), from, replyTo });
+    await env.DB.prepare("INSERT INTO outbound_emails (id, admin_user_id, sender_profile_id, sender_name, sender_email, reply_to, recipient_email, subject, body_text, provider_message_id, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'sent', ?11)")
+      .bind(id, principal.id, profile.id, profile.display_name, senderEmail, replyTo, recipient, subject, message, providerMessageId, now).run();
+  } catch {
+    await env.DB.prepare("INSERT INTO outbound_emails (id, admin_user_id, sender_profile_id, sender_name, sender_email, reply_to, recipient_email, subject, body_text, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'failed', ?10)")
+      .bind(id, principal.id, profile.id, profile.display_name, senderEmail, replyTo, recipient, subject, message, now).run();
+    return errorResponse("We couldn’t send that email. Please try again.", 503);
+  }
+  await auditAdmin(env, principal, "email.sent", "outbound_email", id, recipient);
+  return json({ ok: true, message: `Email sent to ${recipient}.` }, 201);
+}
+
 async function createDriverOffer(request: Request, env: Env): Promise<Response> {
   if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
   const body = await readJson(request);
@@ -1321,6 +1413,9 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
   if (request.method === "GET" && path === "/api/admin/users") return listAdminUsers(request, env);
   if (request.method === "POST" && path === "/api/admin/users") return createAdminUser(request, env);
+  if (request.method === "GET" && path === "/api/admin/outbound-email") return outboundEmailData(request, env);
+  if (request.method === "PATCH" && path === "/api/admin/outbound-email/settings") return updateOutboundEmailSettings(request, env);
+  if (request.method === "POST" && path === "/api/admin/outbound-email") return sendOutboundEmail(request, env);
   const adminUserInviteMatch = path.match(/^\/api\/admin\/users\/([0-9a-f-]{36})\/invite$/u);
   if (adminUserInviteMatch && request.method === "POST") return resendAdminInvite(request, env, adminUserInviteMatch[1]);
   const adminUserMatch = path.match(/^\/api\/admin\/users\/([0-9a-f-]{36})$/u);

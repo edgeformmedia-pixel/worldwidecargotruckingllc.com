@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
   <title>Recruiting Admin | Worldwide Cargo Express</title>
-  <link rel="stylesheet" href="../admin/admin.css?v=20260912-7"><script src="../api-client.js?v=20260912-5"></script><script src="../admin/admin.js?v=20260912-7" defer></script>
+  <link rel="stylesheet" href="../admin/admin.css?v=20260912-8"><script src="../api-client.js?v=20260912-5"></script><script src="../admin/admin.js?v=20260912-8" defer></script>
 </head>
 <body>
   <section class="login-screen" id="loginView">
@@ -20,6 +20,7 @@
         <button class="nav-item active" type="button" data-view="home"><span class="nav-icon">⌂</span>Home</button>
         <button class="nav-item" type="button" data-view="drivers"><span class="nav-icon">D</span>View drivers <b id="navDriverCount">0</b></button>
         <button class="nav-item" type="button" data-view="quotes"><span class="nav-icon">Q</span>Quote requests <b id="navQuoteCount">0</b></button>
+        <button class="nav-item" type="button" data-view="email"><span class="nav-icon">✉</span>Outbound email</button>
         <button class="nav-item" type="button" data-view="users"><span class="nav-icon">U</span>Admin users <b id="navUserCount">0</b></button>
       </nav>
       <div class="sidebar-foot"><div class="signed-in-user"><strong id="currentAdminName">Administrator</strong><span id="currentAdminEmail"></span></div><a href="../quote/index.html" target="_blank" rel="noopener">Open Request a Quote ↗</a><button id="logoutButton" type="button">Log out</button></div>
@@ -56,6 +57,15 @@
         <div class="view-intro"><div><h2>Quote requests</h2><p>Review every submitted freight request in one place.</p></div><a class="button primary" href="../quote/index.html" target="_blank" rel="noopener">Open request form ↗</a></div>
         <div class="toolbar quote-toolbar"><label class="search"><span class="sr-only">Search quotes</span><input id="quoteSearch" type="search" placeholder="Search company, contact, or route"></label><label><span class="sr-only">Quote status</span><select id="quoteStatusFilter"><option value="all">All statuses</option><option value="new">New</option><option value="reviewing">Reviewing</option><option value="quoted">Quoted</option><option value="booked">Booked</option><option value="declined">Declined</option></select></label></div>
         <div class="quote-table-wrap"><table><thead><tr><th>Requester</th><th>Route</th><th>Freight</th><th>Pickup</th><th>Status</th><th>Updated</th></tr></thead><tbody id="quotesBody"></tbody></table><div class="empty-state" id="quotesEmpty" hidden>No quote requests match this view.</div></div>
+      </section>
+
+      <section class="view" id="emailView" hidden>
+        <div class="view-intro"><div><h2>Outbound email</h2><p>Send company email now. Replies and employee inboxes can be added here later.</p></div></div>
+        <div class="email-layout">
+          <section class="home-panel"><div class="panel-head"><div><p class="eyebrow">New message</p><h3>Compose email</h3></div></div><form id="outboundEmailForm" class="email-form"><label for="emailSenderProfile">Send as</label><select id="emailSenderProfile" required></select><label for="outboundTo">To</label><input id="outboundTo" type="email" maxlength="180" autocomplete="email" placeholder="recipient@example.com" required><label for="outboundSubject">Subject</label><input id="outboundSubject" maxlength="200" required><label for="outboundMessage">Message</label><textarea id="outboundMessage" maxlength="10000" rows="9" required></textarea><p class="form-note">Sent messages are saved below. This first version is outbound only.</p><p class="error" id="outboundEmailError" role="alert"></p><button class="button primary" id="sendOutboundEmail" type="submit">Send email</button></form></section>
+          <section class="home-panel"><div class="panel-head"><div><p class="eyebrow">Company defaults</p><h3>Sender settings</h3></div></div><form id="emailSettingsForm" class="email-form"><label for="defaultSenderProfile">Default sender</label><select id="defaultSenderProfile" required></select><label for="defaultReplyTo">Reply-to email <small>(optional)</small></label><input id="defaultReplyTo" type="email" maxlength="180" placeholder="dispatch@company.com"><p class="form-note">The dropdown controls the name recipients see. The verified company address stays protected on the server.</p><p class="error" id="emailSettingsError" role="alert"></p><button class="button secondary" type="submit">Save defaults</button></form></section>
+        </div>
+        <section class="home-panel email-history"><div class="panel-head"><div><p class="eyebrow">Sent record</p><h3>Recent outbound email</h3></div></div><div class="email-history-list" id="outboundEmailHistory"></div></section>
       </section>
 
       <section class="view" id="usersView" hidden>
