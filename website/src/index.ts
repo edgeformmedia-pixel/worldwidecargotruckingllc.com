@@ -105,6 +105,26 @@ type VerificationRow = {
   created_at: string;
 };
 
+type AdminUserRow = {
+  id: string;
+  full_name: string;
+  email: string;
+  password_salt: string | null;
+  password_hash: string | null;
+  password_iterations: number | null;
+  status: "invited" | "active" | "disabled";
+  last_login_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type AdminPrincipal = {
+  id: string | null;
+  fullName: string;
+  email: string | null;
+  bootstrap: boolean;
+};
+
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
@@ -144,6 +164,7 @@ const DRIVER_TYPES = new Set(["owner_operator", "company_driver"]);
 const VERIFICATION_CODE_TTL_MS = 10 * 60 * 1000;
 const VERIFICATION_RESEND_DELAY_MS = 60 * 1000;
 const MAX_VERIFICATION_ATTEMPTS = 5;
+const ADMIN_ACCESS_TOKEN_TTL_MS = 48 * 60 * 60 * 1000;
 const QUOTE_FIELDS = {
   full_name: 120, company_name: 160, email: 180, phone: 30, mc_number: 30, reference_number: 80,
   pickup_city: 100, pickup_state: 40, pickup_zip: 12, pickup_date: 20, pickup_window: 80,
@@ -182,6 +203,61 @@ async function sendEmail(env: Env, details: { to: string; subject: string; html:
     console.error(JSON.stringify({ message: "email delivery failed", status: response.status, detail: message.slice(0, 500) }));
     throw new Error("Email delivery failed");
   }
+}
+
+async function auditAdmin(
+  env: Env,
+  principal: AdminPrincipal,
+  action: string,
+  targetType: string,
+  targetId: string | null,
+  details = "",
+): Promise<void> {
+  await env.DB.prepare(
+    "INSERT INTO admin_audit_log (id, admin_user_id, actor_label, action, target_type, target_id, details) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+  ).bind(crypto.randomUUID(), principal.id, principal.email ?? principal.fullName, action, targetType, targetId, details).run();
+}
+
+async function issueAdminAccessToken(
+  request: Request,
+  env: Env,
+  user: AdminUserRow,
+  purpose: "invite" | "reset",
+  enforceDelay = false,
+): Promise<void> {
+  const latest = await env.DB.prepare(
+    "SELECT created_at FROM admin_access_tokens WHERE admin_user_id = ?1 AND purpose = ?2 ORDER BY created_at DESC LIMIT 1",
+  ).bind(user.id, purpose).first<{ created_at: string }>();
+  if (enforceDelay && latest && Date.now() - Date.parse(`${latest.created_at}${latest.created_at.endsWith("Z") ? "" : "Z"}`) < VERIFICATION_RESEND_DELAY_MS) {
+    throw new Error("Please wait a minute before requesting another email.");
+  }
+  const tokenBytes = new Uint8Array(32);
+  crypto.getRandomValues(tokenBytes);
+  const token = toBase64Url(tokenBytes);
+  const now = new Date();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE admin_access_tokens SET consumed_at = ?1 WHERE admin_user_id = ?2 AND purpose = ?3 AND consumed_at IS NULL")
+      .bind(now.toISOString(), user.id, purpose),
+    env.DB.prepare(
+      "INSERT INTO admin_access_tokens (id, admin_user_id, purpose, token_hash, expires_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    ).bind(crypto.randomUUID(), user.id, purpose, await sha256(token), new Date(now.getTime() + ADMIN_ACCESS_TOKEN_TTL_MS).toISOString(), now.toISOString()),
+  ]);
+  const portalOrigin = String(env.ADMIN_PORTAL_ORIGIN || new URL(request.url).origin).replace(/\/+$/u, "");
+  const accessUrl = `${portalOrigin}/admin/#access-token=${encodeURIComponent(token)}`;
+  const invite = purpose === "invite";
+  const title = invite ? "Your administrator invitation" : "Reset your administrator password";
+  const message = invite
+    ? `Hi ${user.full_name.split(/\s+/u)[0] || "there"}, you have been invited to the Worldwide Cargo Express administrator dashboard. This secure link expires in 48 hours.`
+    : "Use the secure link below to choose a new administrator password. The link expires in 48 hours.";
+  const actionLabel = invite ? "Accept invitation" : "Reset password";
+  const action = `<p style="margin:26px 0 0"><a href="${escapeHtml(accessUrl)}" style="display:inline-block;padding:14px 22px;background:#d31932;color:#fff;font:700 15px Arial,sans-serif;text-decoration:none">${actionLabel}</a></p>`;
+  const baseEmail = emailShell(title, message);
+  await sendEmail(env, {
+    to: user.email,
+    subject: title,
+    html: baseEmail.replace("</td></tr></table></body></html>", `${action}</td></tr></table></body></html>`),
+    text: `${title}\n\n${message}\n\n${accessUrl}`,
+  });
 }
 
 function emailShell(title: string, message: string, code?: string): string {
@@ -400,14 +476,35 @@ function cookieValue(request: Request, name: string): string | null {
   return null;
 }
 
-async function hasAdminSession(request: Request, env: Env): Promise<boolean> {
+async function adminSessionCookie(user: AdminUserRow, env: Env): Promise<string> {
+  const expires = Date.now() + 8 * 60 * 60 * 1000;
+  const signature = await hmac(`wcx-admin-user:${user.id}:${expires}`, env.AUTH_SECRET);
+  return `wcx_admin=${user.id}.${expires}.${signature}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=28800`;
+}
+
+async function hasAdminSession(request: Request, env: Env): Promise<AdminPrincipal | null> {
   const session = cookieValue(request, "wcx_admin");
-  if (!session) return false;
-  const [expiresText, signature] = session.split(".");
+  if (!session) return null;
+  const parts = session.split(".");
+  if (parts.length === 3) {
+    const [adminId, expiresText, signature] = parts;
+    const expires = Number(expiresText);
+    if (!adminId || !signature || !Number.isSafeInteger(expires) || expires <= Date.now()) return null;
+    const expected = await hmac(`wcx-admin-user:${adminId}:${expiresText}`, env.AUTH_SECRET);
+    if (!(await secureEqual(signature, expected))) return null;
+    const user = await env.DB.prepare("SELECT * FROM admin_users WHERE id = ?1 AND status = 'active' LIMIT 1").bind(adminId).first<AdminUserRow>();
+    return user ? { id: user.id, fullName: user.full_name, email: user.email, bootstrap: false } : null;
+  }
+  if (parts.length !== 2) return null;
+  const [expiresText, signature] = parts;
   const expires = Number(expiresText);
-  if (!expiresText || !signature || !Number.isSafeInteger(expires) || expires <= Date.now()) return false;
+  if (!expiresText || !signature || !Number.isSafeInteger(expires) || expires <= Date.now()) return null;
+  const active = await env.DB.prepare("SELECT COUNT(*) AS count FROM admin_users WHERE status = 'active'").first<{ count: number }>();
+  if (Number(active?.count ?? 0) > 0) return null;
   const expected = await hmac(`wcx-admin:${expiresText}`, env.ADMIN_PASSWORD);
-  return secureEqual(signature, expected);
+  return (await secureEqual(signature, expected))
+    ? { id: null, fullName: "Setup administrator", email: null, bootstrap: true }
+    : null;
 }
 
 function validateField(field: keyof typeof UPDATE_FIELDS, value: string): boolean {
@@ -950,14 +1047,140 @@ async function updateQuoteStatus(request: Request, env: Env, quoteId: string): P
 
 async function adminLogin(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
   const password = body?.password;
-  if (typeof password !== "string" || !(await secureEqual(password, env.ADMIN_PASSWORD))) {
+  if (typeof password !== "string") return errorResponse("Incorrect email or password.", 401);
+  if (email) {
+    const user = await env.DB.prepare("SELECT * FROM admin_users WHERE email = ?1 AND status = 'active' LIMIT 1").bind(email).first<AdminUserRow>();
+    if (!user?.password_salt || !user.password_hash || !user.password_iterations) return errorResponse("Incorrect email or password.", 401);
+    const hash = await passwordHash(password, user.password_salt, user.password_iterations, env.AUTH_SECRET);
+    if (!(await secureEqual(hash, user.password_hash))) return errorResponse("Incorrect email or password.", 401);
+    await env.DB.prepare("UPDATE admin_users SET last_login_at = ?1, updated_at = ?1 WHERE id = ?2").bind(new Date().toISOString(), user.id).run();
+    return json(
+      { ok: true, user: { id: user.id, fullName: user.full_name, email: user.email }, bootstrap: false },
+      200,
+      { "set-cookie": await adminSessionCookie(user, env) },
+    );
+  }
+  const active = await env.DB.prepare("SELECT COUNT(*) AS count FROM admin_users WHERE status = 'active'").first<{ count: number }>();
+  if (Number(active?.count ?? 0) > 0 || !(await secureEqual(password, env.ADMIN_PASSWORD))) {
     return errorResponse("Incorrect password.", 401);
   }
   const expires = Date.now() + 8 * 60 * 60 * 1000;
   const signature = await hmac(`wcx-admin:${expires}`, env.ADMIN_PASSWORD);
   const cookie = `wcx_admin=${expires}.${signature}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=28800`;
-  return json({ ok: true }, 200, { "set-cookie": cookie });
+  return json({ ok: true, user: { fullName: "Setup administrator", email: null }, bootstrap: true }, 200, { "set-cookie": cookie });
+}
+
+async function listAdminUsers(request: Request, env: Env): Promise<Response> {
+  const principal = await hasAdminSession(request, env);
+  if (!principal) return errorResponse("Unauthorized.", 401);
+  const result = await env.DB.prepare(
+    "SELECT id, full_name, email, status, last_login_at, created_at, updated_at FROM admin_users ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'invited' THEN 1 ELSE 2 END, full_name",
+  ).all<AdminUserRow>();
+  return json({ ok: true, users: result.results, currentUser: principal });
+}
+
+async function createAdminUser(request: Request, env: Env): Promise<Response> {
+  const principal = await hasAdminSession(request, env);
+  if (!principal) return errorResponse("Unauthorized.", 401);
+  const body = await readJson(request);
+  const fullName = typeof body?.fullName === "string" ? body.fullName.trim() : "";
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  if (!fullName || fullName.length > 120) return errorResponse("Enter the employee’s full name.", 400);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email) || email.length > 180) return errorResponse("Enter a valid email address.", 400);
+  const existing = await env.DB.prepare("SELECT id FROM admin_users WHERE email = ?1 LIMIT 1").bind(email).first<{ id: string }>();
+  if (existing) return errorResponse("An administrator already uses this email.", 409);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    "INSERT INTO admin_users (id, full_name, email, status, created_at, updated_at) VALUES (?1, ?2, ?3, 'invited', ?4, ?4)",
+  ).bind(id, fullName, email, now).run();
+  const user = await env.DB.prepare("SELECT * FROM admin_users WHERE id = ?1").bind(id).first<AdminUserRow>();
+  if (!user) return errorResponse("Unable to create administrator.", 500);
+  try {
+    await issueAdminAccessToken(request, env, user, "invite");
+  } catch {
+    await env.DB.prepare("DELETE FROM admin_users WHERE id = ?1").bind(id).run();
+    return errorResponse("The invitation email could not be sent. No account was created.", 503);
+  }
+  await auditAdmin(env, principal, "admin.invited", "admin_user", id, email);
+  return json({ ok: true, user: { id, full_name: fullName, email, status: "invited", created_at: now, updated_at: now } }, 201);
+}
+
+async function resendAdminInvite(request: Request, env: Env, adminId: string): Promise<Response> {
+  const principal = await hasAdminSession(request, env);
+  if (!principal) return errorResponse("Unauthorized.", 401);
+  const user = await env.DB.prepare("SELECT * FROM admin_users WHERE id = ?1 AND status = 'invited' LIMIT 1").bind(adminId).first<AdminUserRow>();
+  if (!user) return errorResponse("Pending invitation not found.", 404);
+  try {
+    await issueAdminAccessToken(request, env, user, "invite", true);
+  } catch (caught) {
+    const message = caught instanceof Error && caught.message.startsWith("Please wait") ? caught.message : "The invitation email could not be sent.";
+    return errorResponse(message, caught instanceof Error && caught.message.startsWith("Please wait") ? 429 : 503);
+  }
+  await auditAdmin(env, principal, "admin.invitation_resent", "admin_user", user.id, user.email);
+  return json({ ok: true });
+}
+
+async function updateAdminUser(request: Request, env: Env, adminId: string): Promise<Response> {
+  const principal = await hasAdminSession(request, env);
+  if (!principal) return errorResponse("Unauthorized.", 401);
+  const body = await readJson(request);
+  const status = body?.status;
+  if (status !== "active" && status !== "disabled") return errorResponse("Choose active or disabled.", 400);
+  const target = await env.DB.prepare("SELECT * FROM admin_users WHERE id = ?1 LIMIT 1").bind(adminId).first<AdminUserRow>();
+  if (!target) return errorResponse("Administrator not found.", 404);
+  if (principal.id === adminId && status === "disabled") return errorResponse("You cannot disable your own account.", 400);
+  if (status === "disabled" && target.status === "active") {
+    const active = await env.DB.prepare("SELECT COUNT(*) AS count FROM admin_users WHERE status = 'active'").first<{ count: number }>();
+    if (Number(active?.count ?? 0) <= 1) return errorResponse("At least one active administrator is required.", 400);
+  }
+  await env.DB.prepare("UPDATE admin_users SET status = ?1, updated_at = ?2 WHERE id = ?3").bind(status, new Date().toISOString(), adminId).run();
+  await auditAdmin(env, principal, status === "active" ? "admin.enabled" : "admin.disabled", "admin_user", adminId, target.email);
+  return json({ ok: true });
+}
+
+async function requestAdminPasswordReset(request: Request, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const user = await env.DB.prepare("SELECT * FROM admin_users WHERE email = ?1 AND status = 'active' LIMIT 1").bind(email).first<AdminUserRow>();
+  if (user) {
+    try { await issueAdminAccessToken(request, env, user, "reset", true); } catch {
+      // Always return the same response so callers cannot discover administrator addresses.
+    }
+  }
+  return json({ ok: true, message: "If that administrator exists, a secure reset link is on the way." });
+}
+
+async function acceptAdminAccessToken(request: Request, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  const token = typeof body?.token === "string" ? body.token.trim() : "";
+  const password = body?.password;
+  const confirmPassword = body?.confirmPassword;
+  if (token.length < 32 || token.length > 256) return errorResponse("This access link is invalid or expired.", 400);
+  if (typeof password !== "string" || typeof confirmPassword !== "string" || password !== confirmPassword) return errorResponse("Passwords do not match.", 400);
+  if (!validPassword(password)) return errorResponse("Use a password between 10 and 128 characters.", 400);
+  const access = await env.DB.prepare(
+    "SELECT t.id AS token_id, t.purpose, t.expires_at, u.* FROM admin_access_tokens t JOIN admin_users u ON u.id = t.admin_user_id WHERE t.token_hash = ?1 AND t.consumed_at IS NULL LIMIT 1",
+  ).bind(await sha256(token)).first<AdminUserRow & { token_id: string; purpose: "invite" | "reset"; expires_at: string }>();
+  const permitted = access && Date.parse(access.expires_at) > Date.now()
+    && ((access.purpose === "invite" && access.status === "invited") || (access.purpose === "reset" && access.status === "active"));
+  if (!permitted || !access) return errorResponse("This access link is invalid or expired.", 400);
+  const record = await newPasswordRecord(password, env.AUTH_SECRET);
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE admin_users SET password_salt = ?1, password_hash = ?2, password_iterations = ?3, status = 'active', updated_at = ?4 WHERE id = ?5")
+      .bind(record.salt, record.hash, record.iterations, now, access.id),
+    env.DB.prepare("UPDATE admin_access_tokens SET consumed_at = ?1 WHERE id = ?2 AND consumed_at IS NULL").bind(now, access.token_id),
+  ]);
+  const user = { ...access, password_salt: record.salt, password_hash: record.hash, password_iterations: record.iterations, status: "active" as const };
+  await auditAdmin(env, { id: access.id, fullName: access.full_name, email: access.email, bootstrap: false }, access.purpose === "invite" ? "admin.activated" : "admin.password_reset", "admin_user", access.id);
+  return json(
+    { ok: true, user: { id: access.id, fullName: access.full_name, email: access.email } },
+    200,
+    { "set-cookie": await adminSessionCookie(user, env) },
+  );
 }
 
 async function listApplications(request: Request, env: Env): Promise<Response> {
@@ -1090,9 +1313,18 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (request.method === "POST" && path === "/api/admin/login") return adminLogin(request, env);
+  if (request.method === "POST" && path === "/api/admin/request-password-reset") return requestAdminPasswordReset(request, env);
+  if (request.method === "POST" && path === "/api/admin/access-token") return acceptAdminAccessToken(request, env);
   if (request.method === "GET" && path === "/api/admin/session") {
-    return (await hasAdminSession(request, env)) ? json({ ok: true }) : errorResponse("Unauthorized.", 401);
+    const principal = await hasAdminSession(request, env);
+    return principal ? json({ ok: true, user: principal, bootstrap: principal.bootstrap }) : errorResponse("Unauthorized.", 401);
   }
+  if (request.method === "GET" && path === "/api/admin/users") return listAdminUsers(request, env);
+  if (request.method === "POST" && path === "/api/admin/users") return createAdminUser(request, env);
+  const adminUserInviteMatch = path.match(/^\/api\/admin\/users\/([0-9a-f-]{36})\/invite$/u);
+  if (adminUserInviteMatch && request.method === "POST") return resendAdminInvite(request, env, adminUserInviteMatch[1]);
+  const adminUserMatch = path.match(/^\/api\/admin\/users\/([0-9a-f-]{36})$/u);
+  if (adminUserMatch && request.method === "PATCH") return updateAdminUser(request, env, adminUserMatch[1]);
   if (request.method === "GET" && path === "/api/admin/applications") return listApplications(request, env);
   const adminAccountMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]{36})$/u);
   if (adminAccountMatch && request.method === "DELETE") return deleteAccount(request, env, adminAccountMatch[1]);

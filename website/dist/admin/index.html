@@ -3,12 +3,13 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
   <title>Recruiting Admin | Worldwide Cargo Express</title>
-  <link rel="stylesheet" href="../admin/admin.css?v=20260912-6"><script src="../api-client.js?v=20260912-5"></script><script src="../admin/admin.js?v=20260912-6" defer></script>
+  <link rel="stylesheet" href="../admin/admin.css?v=20260912-7"><script src="../api-client.js?v=20260912-5"></script><script src="../admin/admin.js?v=20260912-7" defer></script>
 </head>
 <body>
   <section class="login-screen" id="loginView">
     <div class="login-brand"><img src="../assets/worldwide-cargo-express-logo-transparent.png" alt="Worldwide Cargo Express LLC"></div>
-    <div class="login-card"><p class="eyebrow">Recruiting operations</p><h1>Welcome back.</h1><p>Sign in to manage applicants, documents, and quote requests.</p><form id="loginForm"><label for="password">Administrator password</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus><p class="error" id="loginError" role="alert"></p><button class="button primary" type="submit">Open dashboard</button></form></div>
+    <div class="login-card" id="loginCard"><p class="eyebrow">Recruiting operations</p><h1>Welcome back.</h1><p>Sign in with your individual administrator account. During first-time setup, leave email blank and use the original administrator password.</p><form id="loginForm"><label for="adminEmail">Email</label><input id="adminEmail" name="email" type="email" autocomplete="username" placeholder="you@worldwidecargoexpressllc.com" autofocus><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required><p class="error" id="loginError" role="alert"></p><button class="button primary" type="submit">Open dashboard</button><button class="text-button login-help" id="forgotPassword" type="button">Forgot password?</button></form></div>
+    <div class="login-card" id="accessCard" hidden><p class="eyebrow">Administrator access</p><h1>Choose a password.</h1><p>Use at least 10 characters. This secure link can only be used once.</p><form id="accessForm"><label for="accessPassword">New password</label><input id="accessPassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" required><label for="accessConfirmPassword">Confirm password</label><input id="accessConfirmPassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" required><p class="error" id="accessError" role="alert"></p><button class="button primary" type="submit">Activate account</button></form></div>
   </section>
 
   <div class="app-shell" id="dashboard" hidden>
@@ -19,8 +20,9 @@
         <button class="nav-item active" type="button" data-view="home"><span class="nav-icon">⌂</span>Home</button>
         <button class="nav-item" type="button" data-view="drivers"><span class="nav-icon">D</span>View drivers <b id="navDriverCount">0</b></button>
         <button class="nav-item" type="button" data-view="quotes"><span class="nav-icon">Q</span>Quote requests <b id="navQuoteCount">0</b></button>
+        <button class="nav-item" type="button" data-view="users"><span class="nav-icon">U</span>Admin users <b id="navUserCount">0</b></button>
       </nav>
-      <div class="sidebar-foot"><a href="../quote/index.html" target="_blank" rel="noopener">Open Request a Quote ↗</a><button id="logoutButton" type="button">Log out</button></div>
+      <div class="sidebar-foot"><div class="signed-in-user"><strong id="currentAdminName">Administrator</strong><span id="currentAdminEmail"></span></div><a href="../quote/index.html" target="_blank" rel="noopener">Open Request a Quote ↗</a><button id="logoutButton" type="button">Log out</button></div>
     </aside>
 
     <main class="workspace">
@@ -54,6 +56,15 @@
         <div class="view-intro"><div><h2>Quote requests</h2><p>Review every submitted freight request in one place.</p></div><a class="button primary" href="../quote/index.html" target="_blank" rel="noopener">Open request form ↗</a></div>
         <div class="toolbar quote-toolbar"><label class="search"><span class="sr-only">Search quotes</span><input id="quoteSearch" type="search" placeholder="Search company, contact, or route"></label><label><span class="sr-only">Quote status</span><select id="quoteStatusFilter"><option value="all">All statuses</option><option value="new">New</option><option value="reviewing">Reviewing</option><option value="quoted">Quoted</option><option value="booked">Booked</option><option value="declined">Declined</option></select></label></div>
         <div class="quote-table-wrap"><table><thead><tr><th>Requester</th><th>Route</th><th>Freight</th><th>Pickup</th><th>Status</th><th>Updated</th></tr></thead><tbody id="quotesBody"></tbody></table><div class="empty-state" id="quotesEmpty" hidden>No quote requests match this view.</div></div>
+      </section>
+
+      <section class="view" id="usersView" hidden>
+        <div class="view-intro"><div><h2>Administrator access</h2><p>Invite employees and control access to this dashboard.</p></div></div>
+        <div class="bootstrap-notice" id="bootstrapNotice" hidden><strong>Finish securing this dashboard</strong><p>Add yourself below and accept the invitation from your email. Once the first personal account is active, the original shared password will stop working.</p></div>
+        <div class="users-layout">
+          <section class="home-panel user-create-panel"><div class="panel-head"><div><p class="eyebrow">New administrator</p><h3>Invite an employee</h3></div></div><form id="userForm" class="user-form"><label for="userFullName">Full name</label><input id="userFullName" maxlength="120" autocomplete="name" required><label for="userEmail">Email</label><input id="userEmail" type="email" maxlength="180" autocomplete="email" placeholder="name@worldwidecargoexpressllc.com" required><p class="form-note">They will receive a secure link to create their password. Invitations expire after 48 hours.</p><p class="error" id="userError" role="alert"></p><button class="button primary" id="inviteUserButton" type="submit">Send invitation</button></form></section>
+          <section class="home-panel"><div class="panel-head"><div><p class="eyebrow">Access list</p><h3>Administrators</h3></div></div><div class="admin-user-list" id="adminUserList"></div></section>
+        </div>
       </section>
     </main>
   </div>

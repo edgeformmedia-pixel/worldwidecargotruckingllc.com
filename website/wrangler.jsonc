@@ -26,6 +26,7 @@
   ],
   "vars": {
     "PUBLIC_ORIGINS": "https://edgeformmedia-pixel.github.io,https://worldwidecargoexpressllc.com,https://www.worldwidecargoexpressllc.com,https://worldwide-cargo-express.tlanch.chatgpt.site",
+    "ADMIN_PORTAL_ORIGIN": "https://worldwidecargoexpressllc.com",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAExux6Zn20tsTfSD",
     "EMAIL_FROM": "Worldwide Cargo Express <no-reply@worldwidecargoexpressllc.com>"
   },
