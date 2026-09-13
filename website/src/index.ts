@@ -116,6 +116,8 @@ type AdminUserRow = {
   last_login_at: string | null;
   created_at: string;
   updated_at: string;
+  role: "master" | "employee";
+  sender_profile_id: string | null;
 };
 
 type AdminPrincipal = {
@@ -123,6 +125,7 @@ type AdminPrincipal = {
   fullName: string;
   email: string | null;
   bootstrap: boolean;
+  role: "master" | "employee";
 };
 
 type EmailSenderProfileRow = {
@@ -520,7 +523,7 @@ async function hasAdminSession(request: Request, env: Env): Promise<AdminPrincip
     const expected = await hmac(`wcx-admin-user:${adminId}:${expiresText}`, env.AUTH_SECRET);
     if (!(await secureEqual(signature, expected))) return null;
     const user = await env.DB.prepare("SELECT * FROM admin_users WHERE id = ?1 AND status = 'active' LIMIT 1").bind(adminId).first<AdminUserRow>();
-    return user ? { id: user.id, fullName: user.full_name, email: user.email, bootstrap: false } : null;
+    return user ? { id: user.id, fullName: user.full_name, email: user.email, bootstrap: false, role: user.role } : null;
   }
   if (parts.length !== 2) return null;
   const [expiresText, signature] = parts;
@@ -530,7 +533,7 @@ async function hasAdminSession(request: Request, env: Env): Promise<AdminPrincip
   if (Number(active?.count ?? 0) > 0) return null;
   const expected = await hmac(`wcx-admin:${expiresText}`, env.ADMIN_PASSWORD);
   return (await secureEqual(signature, expected))
-    ? { id: null, fullName: "Setup administrator", email: null, bootstrap: true }
+    ? { id: null, fullName: "Setup administrator", email: null, bootstrap: true, role: "master" }
     : null;
 }
 
@@ -1027,10 +1030,17 @@ function emailAddress(from: string): string {
   return (match?.[1] ?? from).trim();
 }
 
+function isMaster(principal: AdminPrincipal): boolean {
+  return principal.bootstrap || principal.role === "master";
+}
+
 async function outboundEmailData(request: Request, env: Env): Promise<Response> {
-  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const principal = await hasAdminSession(request, env);
+  if (!principal) return errorResponse("Unauthorized.", 401);
   const [profiles, settings, messages] = await Promise.all([
-    env.DB.prepare("SELECT id, label, display_name, active FROM email_sender_profiles WHERE active = 1 ORDER BY label").all<EmailSenderProfileRow>(),
+    principal.bootstrap || principal.role === "master"
+      ? env.DB.prepare("SELECT id, label, display_name, active FROM email_sender_profiles WHERE active = 1 ORDER BY label").all<EmailSenderProfileRow>()
+      : env.DB.prepare("SELECT p.id, p.label, p.display_name, p.active FROM email_sender_profiles p JOIN admin_users u ON u.sender_profile_id = p.id WHERE u.id = ?1 AND p.active = 1").bind(principal.id).all<EmailSenderProfileRow>(),
     env.DB.prepare("SELECT default_sender_profile_id, default_reply_to FROM email_settings WHERE id = 1").first<EmailSettingsRow>(),
     env.DB.prepare("SELECT e.id, e.sender_name, e.sender_email, e.reply_to, e.recipient_email, e.subject, e.body_text, e.status, e.created_at, u.full_name AS employee_name FROM outbound_emails e LEFT JOIN admin_users u ON u.id = e.admin_user_id ORDER BY e.created_at DESC LIMIT 100").all<OutboundEmailRow>(),
   ]);
@@ -1040,6 +1050,7 @@ async function outboundEmailData(request: Request, env: Env): Promise<Response> 
 async function updateOutboundEmailSettings(request: Request, env: Env): Promise<Response> {
   const principal = await hasAdminSession(request, env);
   if (!principal) return errorResponse("Unauthorized.", 401);
+  if (!isMaster(principal)) return errorResponse("Only the Master Admin can change company defaults.", 403);
   const body = await readJson(request);
   const profileId = typeof body?.defaultSenderProfileId === "string" ? body.defaultSenderProfileId.trim() : "";
   const replyTo = typeof body?.defaultReplyTo === "string" ? body.defaultReplyTo.trim().toLowerCase() : "";
@@ -1068,6 +1079,7 @@ async function sendOutboundEmail(request: Request, env: Env): Promise<Response> 
   const selectedProfileId = profileId || settings?.default_sender_profile_id || "general";
   const profile = await env.DB.prepare("SELECT id, label, display_name, active FROM email_sender_profiles WHERE id = ?1 AND active = 1 LIMIT 1").bind(selectedProfileId).first<EmailSenderProfileRow>();
   if (!profile) return errorResponse("Choose an available sender.", 400);
+  if (!isMaster(principal) && profile.id !== (await env.DB.prepare("SELECT sender_profile_id FROM admin_users WHERE id = ?1").bind(principal.id).first<{ sender_profile_id: string | null }>())?.sender_profile_id) return errorResponse("Use the email identity assigned to you.", 403);
   const senderEmail = emailAddress(env.EMAIL_FROM);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(senderEmail)) return errorResponse("The company sending address is not configured.", 503);
   const now = new Date().toISOString();
@@ -1149,7 +1161,7 @@ async function adminLogin(request: Request, env: Env): Promise<Response> {
     if (!(await secureEqual(hash, user.password_hash))) return errorResponse("Incorrect email or password.", 401);
     await env.DB.prepare("UPDATE admin_users SET last_login_at = ?1, updated_at = ?1 WHERE id = ?2").bind(new Date().toISOString(), user.id).run();
     return json(
-      { ok: true, user: { id: user.id, fullName: user.full_name, email: user.email }, bootstrap: false },
+      { ok: true, user: { id: user.id, fullName: user.full_name, email: user.email, role: user.role }, bootstrap: false },
       200,
       { "set-cookie": await adminSessionCookie(user, env) },
     );
@@ -1161,14 +1173,14 @@ async function adminLogin(request: Request, env: Env): Promise<Response> {
   const expires = Date.now() + 8 * 60 * 60 * 1000;
   const signature = await hmac(`wcx-admin:${expires}`, env.ADMIN_PASSWORD);
   const cookie = `wcx_admin=${expires}.${signature}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=28800`;
-  return json({ ok: true, user: { fullName: "Setup administrator", email: null }, bootstrap: true }, 200, { "set-cookie": cookie });
+  return json({ ok: true, user: { fullName: "Setup administrator", email: null, role: "master" }, bootstrap: true }, 200, { "set-cookie": cookie });
 }
 
 async function listAdminUsers(request: Request, env: Env): Promise<Response> {
   const principal = await hasAdminSession(request, env);
   if (!principal) return errorResponse("Unauthorized.", 401);
   const result = await env.DB.prepare(
-    "SELECT id, full_name, email, status, last_login_at, created_at, updated_at FROM admin_users ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'invited' THEN 1 ELSE 2 END, full_name",
+    "SELECT id, full_name, email, status, last_login_at, created_at, updated_at, role, sender_profile_id FROM admin_users ORDER BY CASE role WHEN 'master' THEN 0 ELSE 1 END, full_name",
   ).all<AdminUserRow>();
   return json({ ok: true, users: result.results, currentUser: principal });
 }
@@ -1176,18 +1188,24 @@ async function listAdminUsers(request: Request, env: Env): Promise<Response> {
 async function createAdminUser(request: Request, env: Env): Promise<Response> {
   const principal = await hasAdminSession(request, env);
   if (!principal) return errorResponse("Unauthorized.", 401);
+  if (!isMaster(principal)) return errorResponse("Only the Master Admin can invite employees.", 403);
   const body = await readJson(request);
   const fullName = typeof body?.fullName === "string" ? body.fullName.trim() : "";
   const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const senderProfileId = typeof body?.senderProfileId === "string" ? body.senderProfileId.trim() : "";
   if (!fullName || fullName.length > 120) return errorResponse("Enter the employee’s full name.", 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email) || email.length > 180) return errorResponse("Enter a valid email address.", 400);
+  if (senderProfileId) {
+    const profile = await env.DB.prepare("SELECT id FROM email_sender_profiles WHERE id = ?1 AND active = 1").bind(senderProfileId).first<{ id: string }>();
+    if (!profile) return errorResponse("Choose an available email identity.", 400);
+  }
   const existing = await env.DB.prepare("SELECT id FROM admin_users WHERE email = ?1 LIMIT 1").bind(email).first<{ id: string }>();
   if (existing) return errorResponse("An administrator already uses this email.", 409);
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   await env.DB.prepare(
-    "INSERT INTO admin_users (id, full_name, email, status, created_at, updated_at) VALUES (?1, ?2, ?3, 'invited', ?4, ?4)",
-  ).bind(id, fullName, email, now).run();
+    "INSERT INTO admin_users (id, full_name, email, status, role, sender_profile_id, created_at, updated_at) VALUES (?1, ?2, ?3, 'invited', 'employee', ?4, ?5, ?5)",
+  ).bind(id, fullName, email, senderProfileId || null, now).run();
   const user = await env.DB.prepare("SELECT * FROM admin_users WHERE id = ?1").bind(id).first<AdminUserRow>();
   if (!user) return errorResponse("Unable to create administrator.", 500);
   try {
@@ -1218,7 +1236,20 @@ async function resendAdminInvite(request: Request, env: Env, adminId: string): P
 async function updateAdminUser(request: Request, env: Env, adminId: string): Promise<Response> {
   const principal = await hasAdminSession(request, env);
   if (!principal) return errorResponse("Unauthorized.", 401);
+  if (!isMaster(principal)) return errorResponse("Only the Master Admin can manage employee access.", 403);
   const body = await readJson(request);
+  const senderProfileId = typeof body?.senderProfileId === "string" ? body.senderProfileId.trim() : null;
+  if (senderProfileId !== null) {
+    if (senderProfileId) {
+      const profile = await env.DB.prepare("SELECT id FROM email_sender_profiles WHERE id = ?1 AND active = 1").bind(senderProfileId).first<{ id: string }>();
+      if (!profile) return errorResponse("Choose an available email identity.", 400);
+    }
+    const result = await env.DB.prepare("UPDATE admin_users SET sender_profile_id = ?1, updated_at = ?2 WHERE id = ?3 AND role = 'employee'")
+      .bind(senderProfileId || null, new Date().toISOString(), adminId).run();
+    if (result.meta.changes !== 1) return errorResponse("Employee not found.", 404);
+    await auditAdmin(env, principal, "email.identity_assigned", "admin_user", adminId, senderProfileId || "removed");
+    return json({ ok: true });
+  }
   const status = body?.status;
   if (status !== "active" && status !== "disabled") return errorResponse("Choose active or disabled.", 400);
   const target = await env.DB.prepare("SELECT * FROM admin_users WHERE id = ?1 LIMIT 1").bind(adminId).first<AdminUserRow>();
@@ -1260,16 +1291,18 @@ async function acceptAdminAccessToken(request: Request, env: Env): Promise<Respo
     && ((access.purpose === "invite" && access.status === "invited") || (access.purpose === "reset" && access.status === "active"));
   if (!permitted || !access) return errorResponse("This access link is invalid or expired.", 400);
   const record = await newPasswordRecord(password, env.AUTH_SECRET);
+  const masters = await env.DB.prepare("SELECT COUNT(*) AS count FROM admin_users WHERE role = 'master'").first<{ count: number }>();
+  const role = access.purpose === "invite" && Number(masters?.count ?? 0) === 0 ? "master" : access.role;
   const now = new Date().toISOString();
   await env.DB.batch([
-    env.DB.prepare("UPDATE admin_users SET password_salt = ?1, password_hash = ?2, password_iterations = ?3, status = 'active', updated_at = ?4 WHERE id = ?5")
-      .bind(record.salt, record.hash, record.iterations, now, access.id),
+    env.DB.prepare("UPDATE admin_users SET password_salt = ?1, password_hash = ?2, password_iterations = ?3, status = 'active', role = ?4, updated_at = ?5 WHERE id = ?6")
+      .bind(record.salt, record.hash, record.iterations, role, now, access.id),
     env.DB.prepare("UPDATE admin_access_tokens SET consumed_at = ?1 WHERE id = ?2 AND consumed_at IS NULL").bind(now, access.token_id),
   ]);
-  const user = { ...access, password_salt: record.salt, password_hash: record.hash, password_iterations: record.iterations, status: "active" as const };
-  await auditAdmin(env, { id: access.id, fullName: access.full_name, email: access.email, bootstrap: false }, access.purpose === "invite" ? "admin.activated" : "admin.password_reset", "admin_user", access.id);
+  const user = { ...access, password_salt: record.salt, password_hash: record.hash, password_iterations: record.iterations, status: "active" as const, role };
+  await auditAdmin(env, { id: access.id, fullName: access.full_name, email: access.email, bootstrap: false, role }, access.purpose === "invite" ? "admin.activated" : "admin.password_reset", "admin_user", access.id);
   return json(
-    { ok: true, user: { id: access.id, fullName: access.full_name, email: access.email } },
+    { ok: true, user: { id: access.id, fullName: access.full_name, email: access.email, role } },
     200,
     { "set-cookie": await adminSessionCookie(user, env) },
   );
