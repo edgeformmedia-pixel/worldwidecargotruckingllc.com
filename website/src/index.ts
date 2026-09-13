@@ -1320,6 +1320,18 @@ async function updateAdminUser(request: Request, env: Env, adminId: string): Pro
   return json({ ok: true });
 }
 
+async function deleteAdminUser(request: Request, env: Env, adminId: string): Promise<Response> {
+  const principal = await hasAdminSession(request, env);
+  if (!principal) return errorResponse("Unauthorized.", 401);
+  if (!isMaster(principal)) return errorResponse("Only the Master Admin can delete employee accounts.", 403);
+  const employee = await env.DB.prepare("SELECT id, full_name, email, sender_profile_id FROM admin_users WHERE id = ?1 AND role = 'employee' LIMIT 1").bind(adminId).first<Pick<AdminUserRow, "id" | "full_name" | "email" | "sender_profile_id">>();
+  if (!employee) return errorResponse("Employee not found. Master Admin accounts cannot be deleted here.", 404);
+  await env.DB.prepare("DELETE FROM admin_users WHERE id = ?1").bind(employee.id).run();
+  if (employee.sender_profile_id?.startsWith("employee-")) await env.DB.prepare("DELETE FROM email_sender_profiles WHERE id = ?1").bind(employee.sender_profile_id).run();
+  await auditAdmin(env, principal, "admin.deleted", "admin_user", employee.id, `${employee.full_name} <${employee.email}>`);
+  return json({ ok: true });
+}
+
 async function requestAdminPasswordReset(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
   const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
@@ -1511,6 +1523,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   if (adminUserEmailAccessMatch && request.method === "POST") return addEmployeeEmailAccess(request, env, adminUserEmailAccessMatch[1]);
   const adminUserMatch = path.match(/^\/api\/admin\/users\/([0-9a-f-]{36})$/u);
   if (adminUserMatch && request.method === "PATCH") return updateAdminUser(request, env, adminUserMatch[1]);
+  if (adminUserMatch && request.method === "DELETE") return deleteAdminUser(request, env, adminUserMatch[1]);
   if (request.method === "GET" && path === "/api/admin/applications") return listApplications(request, env);
   const adminAccountMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]{36})$/u);
   if (adminAccountMatch && request.method === "DELETE") return deleteAccount(request, env, adminAccountMatch[1]);
