@@ -5,14 +5,14 @@
   const ui = {
     login: q("#loginView"), dashboard: q("#dashboard"), loginCard: q("#loginCard"), accessCard: q("#accessCard"), loginForm: q("#loginForm"), adminEmail: q("#adminEmail"), password: q("#password"), loginError: q("#loginError"), forgotPassword: q("#forgotPassword"), accessForm: q("#accessForm"), accessPassword: q("#accessPassword"), accessConfirmPassword: q("#accessConfirmPassword"), accessError: q("#accessError"), logout: q("#logoutButton"), refresh: q("#refreshButton"), updated: q("#lastUpdated"), nav: q("#mainNav"), sidebar: q(".sidebar"), mobileMenu: q("#mobileMenu"), viewTitle: q("#viewTitle"), viewEyebrow: q("#viewEyebrow"), currentAdminName: q("#currentAdminName"), currentAdminEmail: q("#currentAdminEmail"),
     homeView: q("#homeView"), driversView: q("#driversView"), quotesView: q("#quotesView"), emailView: q("#emailView"), usersView: q("#usersView"), usersNav: q("#usersNav"), activeCount: q("#activeCount"), phoneCount: q("#phoneCount"), docsCount: q("#docsCount"), readyCount: q("#readyCount"), navDriverCount: q("#navDriverCount"), navQuoteCount: q("#navQuoteCount"), navUserCount: q("#navUserCount"), attentionList: q("#attentionList"), homeQuoteList: q("#homeQuoteList"),
-    driverSearch: q("#driverSearch"), driverTypeFilter: q("#driverTypeFilter"), documentFilter: q("#documentFilter"), phoneColumn: q("#phoneColumn"), docsColumn: q("#docsColumn"), readyColumn: q("#readyColumn"), phoneColumnCount: q("#phoneColumnCount"), docsColumnCount: q("#docsColumnCount"), readyColumnCount: q("#readyColumnCount"), archiveToggle: q("#archiveToggle"), archiveCount: q("#archiveCount"), pipeline: q("#pipeline"), archiveView: q("#archiveView"), archiveGrid: q("#archiveGrid"),
-    quoteSearch: q("#quoteSearch"), quoteStatusFilter: q("#quoteStatusFilter"), quotesBody: q("#quotesBody"), quotesEmpty: q("#quotesEmpty"), outboundEmailForm: q("#outboundEmailForm"), emailSenderProfile: q("#emailSenderProfile"), outboundTo: q("#outboundTo"), outboundSubject: q("#outboundSubject"), outboundMessage: q("#outboundMessage"), outboundEmailError: q("#outboundEmailError"), sendOutboundEmail: q("#sendOutboundEmail"), emailSettingsForm: q("#emailSettingsForm"), defaultSenderProfile: q("#defaultSenderProfile"), defaultReplyTo: q("#defaultReplyTo"), emailSettingsError: q("#emailSettingsError"), outboundEmailHistory: q("#outboundEmailHistory"), sendDialog: q("#sendDialog"), sendForm: q("#sendForm"), sendDriverName: q("#sendDriverName"), sentTo: q("#sentTo"), sendError: q("#sendError"), confirmSend: q("#confirmSend"), userForm: q("#userForm"), userFullName: q("#userFullName"), userEmail: q("#userEmail"), userError: q("#userError"), inviteUserButton: q("#inviteUserButton"), adminUserList: q("#adminUserList"), bootstrapNotice: q("#bootstrapNotice"),
+    driverSearch: q("#driverSearch"), driverTypeFilter: q("#driverTypeFilter"), documentFilter: q("#documentFilter"), phoneColumn: q("#phoneColumn"), docsColumn: q("#docsColumn"), readyColumn: q("#readyColumn"), processedColumn: q("#processedColumn"), partnerColumn: q("#partnerColumn"), callbackColumn: q("#callbackColumn"), phoneColumnCount: q("#phoneColumnCount"), docsColumnCount: q("#docsColumnCount"), readyColumnCount: q("#readyColumnCount"), processedColumnCount: q("#processedColumnCount"), partnerColumnCount: q("#partnerColumnCount"), callbackColumnCount: q("#callbackColumnCount"), archiveToggle: q("#archiveToggle"), archiveCount: q("#archiveCount"), pipeline: q("#pipeline"), archiveView: q("#archiveView"), archiveGrid: q("#archiveGrid"), activeDriverList: q("#activeDriverList"), activeDriverPayout: q("#activeDriverPayout"),
+    quoteSearch: q("#quoteSearch"), quoteStatusFilter: q("#quoteStatusFilter"), quotesBody: q("#quotesBody"), quotesEmpty: q("#quotesEmpty"), outboundEmailForm: q("#outboundEmailForm"), emailSenderProfile: q("#emailSenderProfile"), outboundTo: q("#outboundTo"), outboundSubject: q("#outboundSubject"), outboundMessage: q("#outboundMessage"), outboundEmailError: q("#outboundEmailError"), sendOutboundEmail: q("#sendOutboundEmail"), emailSettingsForm: q("#emailSettingsForm"), defaultSenderProfile: q("#defaultSenderProfile"), defaultReplyTo: q("#defaultReplyTo"), emailSettingsError: q("#emailSettingsError"), outboundEmailHistory: q("#outboundEmailHistory"), partnerDialog: q("#partnerDialog"), partnerForm: q("#partnerForm"), partnerDriverName: q("#partnerDriverName"), partnerCompany: q("#partnerCompany"), partnerNote: q("#partnerNote"), partnerError: q("#partnerError"), confirmPartner: q("#confirmPartner"), activateDialog: q("#activateDialog"), activateForm: q("#activateForm"), activateDriverName: q("#activateDriverName"), driverPayout: q("#driverPayout"), driverStartDate: q("#driverStartDate"), paymentDelayWeeks: q("#paymentDelayWeeks"), activateError: q("#activateError"), confirmActivate: q("#confirmActivate"), userForm: q("#userForm"), userFullName: q("#userFullName"), userEmail: q("#userEmail"), userError: q("#userError"), inviteUserButton: q("#inviteUserButton"), adminUserList: q("#adminUserList"), bootstrapNotice: q("#bootstrapNotice"),
   };
 
   const viewCopy = { home: ["Recruiting overview", "Home"], drivers: ["Applicant workflow", "View drivers"], quotes: ["Freight opportunities", "Quote requests"], email: ["Company communication", "Outbound email"], users: ["Security and access", "Admin users"] };
   const experience = { under_1: "Less than 1 year", under_2: "Less than 2 years", under_5: "Less than 5 years", under_10: "Less than 10 years" };
-  const stageLabels = { phone_screen: "Phone call", docs_requested: "Documents", docs_received: "Ready to send" };
-  let applications = [], quotes = [], adminUsers = [], emailProfiles = [], outboundMessages = [], emailSettings = {}, currentAdmin = null, bootstrapSession = false, refreshTimer, activeView = "home", showingArchive = false, sendTarget = null;
+  const stageLabels = { phone_screen: "Phone call", docs_requested: "Documents requested", docs_received: "Documents received", documents_processed: "Documents processed", sold_hired_partner: "Sold / hired for partner", callback_hired: "Call back given" };
+  let applications = [], activeDrivers = [], quotes = [], adminUsers = [], emailProfiles = [], outboundMessages = [], emailSettings = {}, currentAdmin = null, bootstrapSession = false, refreshTimer, activeView = "home", showingArchive = false, partnerTarget = null, activateTarget = null;
 
   function showLogin() { ui.login.hidden = false; ui.loginCard.hidden = false; ui.accessCard.hidden = true; ui.dashboard.hidden = true; clearInterval(refreshTimer); }
   function isMasterAdmin() { return bootstrapSession || currentAdmin?.role === "master"; }
@@ -52,7 +52,7 @@
     const docs = element("div", "doc-checks"); docs.append(documentBadge("CDL", Boolean(app.cdl_document_uploaded_at)), documentBadge("Medical card", Boolean(app.medical_card_uploaded_at), isExpired(app)));
     card.append(top, contact, docs);
     if (app.medical_card_expiration) card.append(element("p", "driver-note", `Medical card expires ${readableDate(app.medical_card_expiration)}${isExpired(app) ? " — expired" : ""}`));
-    if (app.sent_at) card.append(element("p", "driver-note", `Sent to ${app.sent_to} on ${readableDate(app.sent_at)}`));
+    if (app.partner_company) card.append(element("p", "driver-note", `Sold / hired to ${app.partner_company}${app.partner_note ? ` — ${app.partner_note}` : ""}`));
     const actions = element("div", "driver-actions");
     if (archived) {
       actions.append(actionButton("Restore", "next", "restore"));
@@ -67,9 +67,10 @@
       if (stage === "docs_requested") {
         actions.append(actionButton("Documents complete", "next", "docs-complete", !app.cdl_document_uploaded_at || !app.medical_card_uploaded_at));
       }
-      if (stage === "docs_received") {
-        actions.append(actionButton(app.sent_at ? "Update sent record" : "Mark as sent", "next", "mark-sent"));
-      }
+      if (stage === "docs_received") actions.append(actionButton("Documents processed", "next", "process-documents"));
+      if (stage === "documents_processed") actions.append(actionButton("Record partner hire", "next", "partner-hire"));
+      if (stage === "sold_hired_partner") actions.append(actionButton("Call back given", "next", "callback-hired"));
+      if (stage === "callback_hired") actions.append(actionButton("Add active driver", "next", "activate-driver"));
       actions.append(actionButton("Archive", "archive", "archive"));
     }
     card.append(actions); return card;
@@ -83,12 +84,30 @@
   }
 
   function renderDrivers() {
-    const active = filteredApplications(false), archived = filteredApplications(true), groups = { phone_screen: [], docs_requested: [], docs_received: [] };
+    const active = filteredApplications(false), archived = filteredApplications(true), groups = { phone_screen: [], docs_requested: [], docs_received: [], documents_processed: [], sold_hired_partner: [], callback_hired: [] };
     active.forEach((app) => groups[applicationStage(app)].push(app));
-    const columns = [[ui.phoneColumn, ui.phoneColumnCount, groups.phone_screen, "No applicants are waiting for a call."], [ui.docsColumn, ui.docsColumnCount, groups.docs_requested, "No applicants are waiting on documents."], [ui.readyColumn, ui.readyColumnCount, groups.docs_received, "No complete driver packets yet."]];
+    const columns = [[ui.phoneColumn, ui.phoneColumnCount, groups.phone_screen, "No applicants are waiting for a call."], [ui.docsColumn, ui.docsColumnCount, groups.docs_requested, "No applicants are waiting on documents."], [ui.readyColumn, ui.readyColumnCount, groups.docs_received, "No complete driver packets yet."], [ui.processedColumn, ui.processedColumnCount, groups.documents_processed, "No processed driver packets yet."], [ui.partnerColumn, ui.partnerColumnCount, groups.sold_hired_partner, "No partner hires recorded yet."], [ui.callbackColumn, ui.callbackColumnCount, groups.callback_hired, "No callbacks ready to activate."]];
     for (const [container, count, items, message] of columns) { count.textContent = items.length; if (!items.length) empty(container, message); else container.replaceChildren(...items.map((app) => driverCard(app))); }
     ui.archiveCount.textContent = applications.filter((app) => app.status === "submitted" && app.archived_at).length;
     if (!archived.length) empty(ui.archiveGrid, "No archived applicants match these filters."); else ui.archiveGrid.replaceChildren(...archived.map((app) => driverCard(app, true)));
+    renderActiveDrivers();
+  }
+
+  function money(cents) { return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(cents || 0) / 100); }
+  function renderActiveDrivers() {
+    const active = activeDrivers.filter((driver) => driver.status === "active");
+    ui.activeDriverPayout.textContent = money(active.reduce((total, driver) => total + Number(driver.payout_cents || 0), 0));
+    if (!activeDrivers.length) { empty(ui.activeDriverList, "No active drivers yet. Complete step 6 and enter the payout to add one."); return; }
+    ui.activeDriverList.replaceChildren(...activeDrivers.map((driver) => {
+      const item = element("article", `active-driver${driver.status === "off" ? " off" : ""}`); item.dataset.activeDriverId = driver.id;
+      const identity = element("div", "active-driver-identity"), name = element("strong", "", driver.full_name || "Unnamed driver"), detail = element("span", "", `${driver.partner_company || "Partner not recorded"} · Started ${readableDate(driver.driver_start_date)}`), due = element("small", "", `Expected payment ${readableDate(driver.expected_payment_date)} (${driver.payment_delay_weeks} week${Number(driver.payment_delay_weeks) === 1 ? "" : "s"} after start)`);
+      identity.append(name, detail, due);
+      const payout = element("strong", "active-driver-payout", money(driver.payout_cents));
+      const controls = element("div", "active-driver-controls");
+      if (driver.status === "active") { controls.append(actionButton("Edit payout / start", "", "edit-active-driver"), actionButton("Driver off", "danger", "driver-off")); }
+      else controls.append(element("span", "off-pill", `Off ${readableDate(driver.turned_off_at)}`));
+      item.append(identity, payout, controls); return item;
+    }));
   }
 
   function attentionItem(title, detail, badge, quote = false) { const item = element("article", "attention-item"), copy = element("div"), strong = element("strong", "", title), p = element("p", "", detail), state = element("span", quote ? "quote-state" : "", badge); copy.append(strong, p); item.append(copy, state); return item; }
@@ -172,11 +191,11 @@
 
   async function refreshAll() {
     try {
-      const requests = [fetch("/api/admin/applications", { cache: "no-store" }), fetch("/api/admin/quotes", { cache: "no-store" }), fetch("/api/admin/outbound-email", { cache: "no-store" })]; if (isMasterAdmin()) requests.push(fetch("/api/admin/users", { cache: "no-store" }));
-      const responses = await Promise.all(requests), [appsResponse, quotesResponse, emailResponse, usersResponse] = responses;
+      const requests = [fetch("/api/admin/applications", { cache: "no-store" }), fetch("/api/admin/active-drivers", { cache: "no-store" }), fetch("/api/admin/quotes", { cache: "no-store" }), fetch("/api/admin/outbound-email", { cache: "no-store" })]; if (isMasterAdmin()) requests.push(fetch("/api/admin/users", { cache: "no-store" }));
+      const responses = await Promise.all(requests), [appsResponse, activeDriversResponse, quotesResponse, emailResponse, usersResponse] = responses;
       if (responses.some((response) => response.status === 401)) { showLogin(); return; }
-      if (!appsResponse.ok || !quotesResponse.ok || !emailResponse.ok || (usersResponse && !usersResponse.ok)) throw new Error();
-      const appData = await appsResponse.json(), quoteData = await quotesResponse.json(), emailData = await emailResponse.json(), userData = usersResponse ? await usersResponse.json() : {}; applications = appData.applications || []; quotes = quoteData.quotes || []; adminUsers = userData.users || []; emailProfiles = emailData.profiles || []; emailSettings = emailData.settings || {}; outboundMessages = emailData.messages || []; currentAdmin = userData.currentUser || currentAdmin; bootstrapSession = Boolean(currentAdmin?.bootstrap); ui.usersNav.hidden = !isMasterAdmin(); ui.currentAdminName.textContent = currentAdmin?.fullName || "Administrator"; ui.currentAdminEmail.textContent = currentAdmin?.email || (bootstrapSession ? "First-time setup" : ""); renderAll(); ui.updated.textContent = `Updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+      if (!appsResponse.ok || !activeDriversResponse.ok || !quotesResponse.ok || !emailResponse.ok || (usersResponse && !usersResponse.ok)) throw new Error();
+      const appData = await appsResponse.json(), activeDriverData = await activeDriversResponse.json(), quoteData = await quotesResponse.json(), emailData = await emailResponse.json(), userData = usersResponse ? await usersResponse.json() : {}; applications = appData.applications || []; activeDrivers = activeDriverData.drivers || []; quotes = quoteData.quotes || []; adminUsers = userData.users || []; emailProfiles = emailData.profiles || []; emailSettings = emailData.settings || {}; outboundMessages = emailData.messages || []; currentAdmin = userData.currentUser || currentAdmin; bootstrapSession = Boolean(currentAdmin?.bootstrap); ui.usersNav.hidden = !isMasterAdmin(); ui.currentAdminName.textContent = currentAdmin?.fullName || "Administrator"; ui.currentAdminEmail.textContent = currentAdmin?.email || (bootstrapSession ? "First-time setup" : ""); renderAll(); ui.updated.textContent = `Updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
     } catch { ui.updated.textContent = "Unable to refresh"; }
   }
 
@@ -185,6 +204,8 @@
     try {
       if (button.dataset.action === "request-docs") await patchApplication(app.id, { stage: "docs_requested" });
       if (button.dataset.action === "docs-complete") await patchApplication(app.id, { stage: "docs_received" });
+      if (button.dataset.action === "process-documents") await patchApplication(app.id, { stage: "documents_processed" });
+      if (button.dataset.action === "callback-hired") await patchApplication(app.id, { stage: "callback_hired" });
       if (button.dataset.action === "archive") await patchApplication(app.id, { archive: true });
       if (button.dataset.action === "restore") await patchApplication(app.id, { archive: false });
       if (button.dataset.action === "request-medical-card") {
@@ -194,7 +215,8 @@
         alert(data.message || `Medical card request sent to ${app.email}.`);
         button.disabled = false;
       }
-      if (button.dataset.action === "mark-sent") { sendTarget = app; ui.sendDriverName.textContent = `Record who received ${app.full_name || "this driver"}’s CDL and medical card.`; ui.sentTo.value = app.sent_to || ""; ui.sendError.textContent = ""; ui.sendDialog.showModal(); button.disabled = false; }
+      if (button.dataset.action === "partner-hire") { partnerTarget = app; ui.partnerDriverName.textContent = `Record the company ${app.full_name || "this driver"} was sold or hired to.`; ui.partnerCompany.value = app.partner_company || ""; ui.partnerNote.value = app.partner_note || ""; ui.partnerError.textContent = ""; ui.partnerDialog.showModal(); button.disabled = false; }
+      if (button.dataset.action === "activate-driver") { activateTarget = app; ui.activateDriverName.textContent = `Enter payout and start date before adding ${app.full_name || "this driver"} to active accounting.`; ui.driverPayout.value = ""; ui.driverStartDate.value = ""; ui.paymentDelayWeeks.value = "1"; ui.activateError.textContent = ""; ui.activateForm.dataset.activeDriverId = ""; ui.activateDialog.showModal(); button.disabled = false; }
     } catch (error) { alert(error.message || "Unable to update applicant."); button.disabled = false; }
   }
 
@@ -213,10 +235,12 @@
   document.addEventListener("click", (event) => { const button = event.target.closest("[data-go]"); if (button) switchView(button.dataset.go); });
   [ui.driverSearch, ui.driverTypeFilter, ui.documentFilter].forEach((control) => control.addEventListener("input", renderDrivers));
   [ui.quoteSearch, ui.quoteStatusFilter].forEach((control) => control.addEventListener("input", renderQuotes));
-  ui.phoneColumn.addEventListener("click", driverAction); ui.docsColumn.addEventListener("click", driverAction); ui.readyColumn.addEventListener("click", driverAction); ui.archiveGrid.addEventListener("click", driverAction);
+  ui.phoneColumn.addEventListener("click", driverAction); ui.docsColumn.addEventListener("click", driverAction); ui.readyColumn.addEventListener("click", driverAction); ui.processedColumn.addEventListener("click", driverAction); ui.partnerColumn.addEventListener("click", driverAction); ui.callbackColumn.addEventListener("click", driverAction); ui.archiveGrid.addEventListener("click", driverAction);
   ui.archiveToggle.addEventListener("click", () => { showingArchive = !showingArchive; ui.pipeline.hidden = showingArchive; ui.archiveView.hidden = !showingArchive; ui.archiveToggle.firstChild.textContent = showingArchive ? "Back to pipeline " : "View archive "; });
   ui.quotesBody.addEventListener("change", async (event) => { const select = event.target.closest("select[data-quote]"); if (!select) return; select.disabled = true; try { const response = await fetch(`/api/admin/quotes/${select.dataset.quote}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: select.value }) }); if (!response.ok) throw new Error(); await refreshAll(); } catch { select.disabled = false; alert("Unable to update quote status."); } });
-  ui.sendForm.addEventListener("submit", async (event) => { event.preventDefault(); if (event.submitter?.value === "cancel") { ui.sendDialog.close(); return; } if (!sendTarget || !ui.sentTo.value.trim()) { ui.sendError.textContent = "Enter who received the documents."; return; } ui.confirmSend.disabled = true; try { await patchApplication(sendTarget.id, { sentTo: ui.sentTo.value }); ui.sendDialog.close(); sendTarget = null; } catch (error) { ui.sendError.textContent = error.message; } finally { ui.confirmSend.disabled = false; } });
+  ui.partnerForm.addEventListener("submit", async (event) => { event.preventDefault(); if (event.submitter?.value === "cancel") { ui.partnerDialog.close(); return; } if (!partnerTarget || !ui.partnerCompany.value.trim()) { ui.partnerError.textContent = "Enter the company sold or hired to."; return; } ui.confirmPartner.disabled = true; try { await patchApplication(partnerTarget.id, { partnerCompany: ui.partnerCompany.value, partnerNote: ui.partnerNote.value }); ui.partnerDialog.close(); partnerTarget = null; } catch (error) { ui.partnerError.textContent = error.message; } finally { ui.confirmPartner.disabled = false; } });
+  ui.activateForm.addEventListener("submit", async (event) => { event.preventDefault(); if (event.submitter?.value === "cancel") { ui.activateDialog.close(); return; } const activeDriverId = ui.activateForm.dataset.activeDriverId; if ((!activateTarget && !activeDriverId) || !ui.driverPayout.value || !ui.driverStartDate.value) { ui.activateError.textContent = "Enter both payout and driver start date."; return; } ui.confirmActivate.disabled = true; try { const response = await fetch(activeDriverId ? `/api/admin/active-drivers/${activeDriverId}` : `/api/admin/applications/${activateTarget.id}/activate`, { method: activeDriverId ? "PATCH" : "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ payout: Number(ui.driverPayout.value), startDate: ui.driverStartDate.value, paymentDelayWeeks: Number(ui.paymentDelayWeeks.value) }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Unable to save active driver."); await refreshAll(); ui.activateDialog.close(); activateTarget = null; ui.activateForm.dataset.activeDriverId = ""; } catch (error) { ui.activateError.textContent = error.message; } finally { ui.confirmActivate.disabled = false; } });
+  ui.activeDriverList.addEventListener("click", async (event) => { const button = event.target.closest("button[data-action]"), item = event.target.closest("[data-active-driver-id]"); if (!button || !item) return; const driver = activeDrivers.find((candidate) => candidate.id === item.dataset.activeDriverId); if (!driver) return; if (button.dataset.action === "driver-off") { if (!confirm(`Turn off ${driver.full_name || "this driver"}? They will no longer count in active driver accounting.`)) return; button.disabled = true; try { const response = await fetch(`/api/admin/active-drivers/${driver.id}/off`, { method: "PATCH" }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Unable to turn driver off."); await refreshAll(); } catch (error) { alert(error.message); button.disabled = false; } return; } if (button.dataset.action === "edit-active-driver") { activateTarget = null; ui.activateDriverName.textContent = `Update the payout or start date for ${driver.full_name || "this driver"}.`; ui.driverPayout.value = (Number(driver.payout_cents) / 100).toFixed(2); ui.driverStartDate.value = driver.driver_start_date; ui.paymentDelayWeeks.value = String(driver.payment_delay_weeks); ui.activateError.textContent = ""; ui.activateForm.dataset.activeDriverId = driver.id; ui.activateDialog.showModal(); } });
   const accessToken = new URLSearchParams(location.hash.slice(1)).get("access-token");
   if (accessToken) { ui.login.hidden = false; ui.loginCard.hidden = true; ui.accessCard.hidden = false; ui.dashboard.hidden = true; ui.accessForm.dataset.token = accessToken; ui.accessPassword.focus(); }
   else fetch("/api/admin/session", { cache: "no-store" }).then(async (response) => response.ok ? showDashboard(await response.json()) : showLogin()).catch(showLogin);

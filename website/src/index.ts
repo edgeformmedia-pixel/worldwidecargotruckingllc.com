@@ -24,12 +24,14 @@ type ApplicationRow = {
   cdl_processing_consent_at?: string | null;
   medical_card_uploaded_at?: string | null;
   medical_card_expiration?: string | null;
-  recruiting_stage?: "phone_screen" | "docs_requested" | "docs_received";
+  recruiting_stage?: "phone_screen" | "docs_requested" | "docs_received" | "documents_processed" | "sold_hired_partner" | "callback_hired";
   talked_to_at?: string | null;
   docs_requested_at?: string | null;
   archived_at?: string | null;
   sent_to?: string;
   sent_at?: string | null;
+  partner_company?: string;
+  partner_note?: string;
   account_id?: string | null;
   review_status?: "new" | "reviewing" | "approved" | "declined";
 };
@@ -180,7 +182,7 @@ const YES_NO_VALUES = new Set(["yes", "no"]);
 const START_VALUES = new Set(["tomorrow", "this_week", "more_than_week"]);
 const CDL_CONTENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 const MAX_CDL_SIZE_BYTES = 5 * 1024 * 1024;
-const RECRUITING_STAGES = new Set(["phone_screen", "docs_requested", "docs_received"]);
+const RECRUITING_STAGES = new Set(["phone_screen", "docs_requested", "docs_received", "documents_processed", "sold_hired_partner", "callback_hired"]);
 
 function cdlExtension(contentType: string | undefined): string {
   if (contentType === "image/png") return "png";
@@ -1400,10 +1402,10 @@ async function listApplications(request: Request, env: Env): Promise<Response> {
   const allowedStatus = status === "draft" || status === "submitted" ? status : null;
   const statement = allowedStatus
     ? env.DB.prepare(
-      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, archived_at, sent_to, sent_at, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
     ).bind(allowedStatus)
     : env.DB.prepare(
-      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, archived_at, sent_to, sent_at, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
     );
   const result = await statement.all<ApplicationRow>();
   return json({ ok: true, applications: result.results });
@@ -1435,16 +1437,81 @@ async function updateRecruitingApplication(request: Request, env: Env, applicati
     ).bind(stage, now, applicationId).run();
     return json({ ok: true });
   }
-  if (typeof body?.sentTo === "string") {
-    const sentTo = body.sentTo.trim();
-    if (!sentTo || sentTo.length > 160) return errorResponse("Enter who received the driver documents.", 400);
+  if (typeof body?.partnerCompany === "string") {
+    const partnerCompany = body.partnerCompany.trim();
+    const partnerNote = typeof body?.partnerNote === "string" ? body.partnerNote.trim() : "";
+    if (!partnerCompany || partnerCompany.length > 160) return errorResponse("Enter the partner company that hired this driver.", 400);
+    if (partnerNote.length > 1000) return errorResponse("Keep the company note under 1,000 characters.", 400);
     const result = await env.DB.prepare(
-      "UPDATE applications SET sent_to = ?1, sent_at = ?2, updated_at = ?2 WHERE id = ?3 AND recruiting_stage = 'docs_received' AND archived_at IS NULL",
-    ).bind(sentTo, now, applicationId).run();
-    if (result.meta.changes !== 1) return errorResponse("Ready driver not found.", 404);
+      "UPDATE applications SET partner_company = ?1, partner_note = ?2, recruiting_stage = 'sold_hired_partner', updated_at = ?3 WHERE id = ?4 AND recruiting_stage = 'documents_processed' AND archived_at IS NULL",
+    ).bind(partnerCompany, partnerNote, now, applicationId).run();
+    if (result.meta.changes !== 1) return errorResponse("Driver must be in Documents processed before recording the partner hire.", 404);
     return json({ ok: true });
   }
   return errorResponse("Choose an update.", 400);
+}
+
+async function listActiveDrivers(request: Request, env: Env): Promise<Response> {
+  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const result = await env.DB.prepare(
+    "SELECT d.id, d.application_id, d.payout_cents, d.driver_start_date, d.payment_delay_weeks, d.expected_payment_date, d.status, d.turned_off_at, d.created_at, a.full_name, a.phone, a.email, a.driver_type, a.partner_company FROM active_drivers d JOIN applications a ON a.id = d.application_id ORDER BY CASE d.status WHEN 'active' THEN 0 ELSE 1 END, d.expected_payment_date ASC LIMIT 500",
+  ).all();
+  return json({ ok: true, drivers: result.results });
+}
+
+async function activateDriver(request: Request, env: Env, applicationId: string): Promise<Response> {
+  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const body = await readJson(request);
+  const payout = typeof body?.payout === "number" ? body.payout : Number(body?.payout);
+  const startDate = typeof body?.startDate === "string" ? body.startDate.trim() : "";
+  const delayWeeks = Number(body?.paymentDelayWeeks);
+  if (!Number.isFinite(payout) || payout < 0 || payout > 1_000_000) return errorResponse("Enter a valid payout amount.", 400);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || Number.isNaN(Date.parse(`${startDate}T00:00:00Z`))) return errorResponse("Enter a valid driver start date.", 400);
+  if (delayWeeks !== 1 && delayWeeks !== 2) return errorResponse("Choose whether payment is due one or two weeks after the driver starts.", 400);
+  const application = await env.DB.prepare(
+    "SELECT id FROM applications WHERE id = ?1 AND status = 'submitted' AND recruiting_stage = 'callback_hired' AND archived_at IS NULL LIMIT 1",
+  ).bind(applicationId).first<{ id: string }>();
+  if (!application) return errorResponse("Driver must be at step 6 before becoming active.", 400);
+  const due = new Date(`${startDate}T00:00:00Z`);
+  due.setUTCDate(due.getUTCDate() + delayWeeks * 7);
+  const expectedPaymentDate = due.toISOString().slice(0, 10);
+  const now = new Date().toISOString();
+  try {
+    await env.DB.prepare(
+      "INSERT INTO active_drivers (id, application_id, payout_cents, driver_start_date, payment_delay_weeks, expected_payment_date, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+    ).bind(crypto.randomUUID(), applicationId, Math.round(payout * 100), startDate, delayWeeks, expectedPaymentDate, now).run();
+  } catch {
+    return errorResponse("This driver is already in accounting.", 409);
+  }
+  return json({ ok: true });
+}
+
+async function turnDriverOff(request: Request, env: Env, activeDriverId: string): Promise<Response> {
+  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const now = new Date().toISOString();
+  const result = await env.DB.prepare(
+    "UPDATE active_drivers SET status = 'off', turned_off_at = ?1, updated_at = ?1 WHERE id = ?2 AND status = 'active'",
+  ).bind(now, activeDriverId).run();
+  if (result.meta.changes !== 1) return errorResponse("Active driver not found.", 404);
+  return json({ ok: true });
+}
+
+async function updateActiveDriver(request: Request, env: Env, activeDriverId: string): Promise<Response> {
+  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const body = await readJson(request);
+  const payout = typeof body?.payout === "number" ? body.payout : Number(body?.payout);
+  const startDate = typeof body?.startDate === "string" ? body.startDate.trim() : "";
+  const delayWeeks = Number(body?.paymentDelayWeeks);
+  if (!Number.isFinite(payout) || payout < 0 || payout > 1_000_000) return errorResponse("Enter a valid payout amount.", 400);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || Number.isNaN(Date.parse(`${startDate}T00:00:00Z`))) return errorResponse("Enter a valid driver start date.", 400);
+  if (delayWeeks !== 1 && delayWeeks !== 2) return errorResponse("Choose a one- or two-week payment delay.", 400);
+  const due = new Date(`${startDate}T00:00:00Z`);
+  due.setUTCDate(due.getUTCDate() + delayWeeks * 7);
+  const result = await env.DB.prepare(
+    "UPDATE active_drivers SET payout_cents = ?1, driver_start_date = ?2, payment_delay_weeks = ?3, expected_payment_date = ?4, updated_at = ?5 WHERE id = ?6",
+  ).bind(Math.round(payout * 100), startDate, delayWeeks, due.toISOString().slice(0, 10), new Date().toISOString(), activeDriverId).run();
+  if (result.meta.changes !== 1) return errorResponse("Active driver not found.", 404);
+  return json({ ok: true });
 }
 
 async function deleteAccount(request: Request, env: Env, accountId: string): Promise<Response> {
@@ -1544,11 +1611,18 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   if (adminUserMatch && request.method === "PATCH") return updateAdminUser(request, env, adminUserMatch[1]);
   if (adminUserMatch && request.method === "DELETE") return deleteAdminUser(request, env, adminUserMatch[1]);
   if (request.method === "GET" && path === "/api/admin/applications") return listApplications(request, env);
+  if (request.method === "GET" && path === "/api/admin/active-drivers") return listActiveDrivers(request, env);
   const adminAccountMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]{36})$/u);
   if (adminAccountMatch && request.method === "DELETE") return deleteAccount(request, env, adminAccountMatch[1]);
   const adminApplicationMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})$/u);
   if (adminApplicationMatch && request.method === "PATCH") return updateRecruitingApplication(request, env, adminApplicationMatch[1]);
   if (adminApplicationMatch && request.method === "DELETE") return deleteApplication(request, env, adminApplicationMatch[1]);
+  const activeDriverApplicationMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/activate$/u);
+  if (activeDriverApplicationMatch && request.method === "POST") return activateDriver(request, env, activeDriverApplicationMatch[1]);
+  const activeDriverMatch = path.match(/^\/api\/admin\/active-drivers\/([0-9a-f-]{36})\/off$/u);
+  if (activeDriverMatch && request.method === "PATCH") return turnDriverOff(request, env, activeDriverMatch[1]);
+  const activeDriverEditMatch = path.match(/^\/api\/admin\/active-drivers\/([0-9a-f-]{36})$/u);
+  if (activeDriverEditMatch && request.method === "PATCH") return updateActiveDriver(request, env, activeDriverEditMatch[1]);
   const medicalCardRequestMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/request-medical-card$/u);
   if (medicalCardRequestMatch && request.method === "POST") return requestMedicalCardEmail(request, env, medicalCardRequestMatch[1]);
   const cdlDownloadMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/documents\/cdl$/u);
