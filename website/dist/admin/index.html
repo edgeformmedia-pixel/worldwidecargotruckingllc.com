@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
   <title>Recruiting Admin | Worldwide Cargo Express</title>
-  <link rel="stylesheet" href="../admin/admin.css?v=20260913-1"><script src="../api-client.js?v=20260912-5"></script><script src="../admin/admin.js?v=20260913-2" defer></script>
+  <link rel="stylesheet" href="../admin/admin.css?v=20260914-1"><script src="../api-client.js?v=20260912-5"></script><script src="../admin/admin.js?v=20260914-1" defer></script>
 </head>
 <body>
   <section class="login-screen" id="loginView">
@@ -44,7 +44,7 @@
 
       <section class="view" id="driversView" hidden>
         <div class="view-intro"><div><h2>Driver pipeline</h2><p>Track each applicant through documents, partner hire, callback, and activation.</p></div><button class="button secondary" id="archiveToggle" type="button">View archive <span id="archiveCount">0</span></button></div>
-        <div class="toolbar"><label class="search"><span class="sr-only">Search drivers</span><input id="driverSearch" type="search" placeholder="Search name, phone, or email"></label><label><span class="sr-only">Driver type</span><select id="driverTypeFilter"><option value="all">All driver types</option><option value="owner_operator">Owner-operators</option><option value="company_driver">Company drivers</option></select></label><label><span class="sr-only">Document status</span><select id="documentFilter"><option value="all">All document statuses</option><option value="missing_cdl">Missing CDL</option><option value="missing_medical">Missing medical card</option><option value="complete">Documents complete</option><option value="expired">Medical card expired</option></select></label></div>
+        <div class="toolbar"><label class="search"><span class="sr-only">Search drivers</span><input id="driverSearch" type="search" placeholder="Search name, phone, or email"></label><label><span class="sr-only">Application status</span><select id="applicationStatusFilter"><option value="all">All applications</option><option value="draft">Incomplete applications</option><option value="submitted">Submitted applications</option></select></label><label><span class="sr-only">Driver type</span><select id="driverTypeFilter"><option value="all">All driver types</option><option value="owner_operator">Owner-operators</option><option value="company_driver">Company drivers</option></select></label><label><span class="sr-only">Document status</span><select id="documentFilter"><option value="all">All document statuses</option><option value="missing_cdl">Missing CDL</option><option value="missing_medical">Missing medical card</option><option value="complete">Documents complete</option><option value="expired">Medical card expired</option></select></label></div>
         <div class="pipeline" id="pipeline">
           <section class="pipeline-column stage-phone"><header><div><span class="step-number">1</span><div><h3>Talk on phone</h3><p>New applicants to contact</p></div></div><b id="phoneColumnCount">0</b></header><div class="card-list" id="phoneColumn"></div></section>
           <section class="pipeline-column stage-docs"><header><div><span class="step-number">2</span><div><h3>Documents requested</h3><p>Collect CDL and medical card</p></div></div><b id="docsColumnCount">0</b></header><div class="card-list" id="docsColumn"></div></section>

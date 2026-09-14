@@ -5,7 +5,7 @@
   const ui = {
     login: q("#loginView"), dashboard: q("#dashboard"), loginCard: q("#loginCard"), accessCard: q("#accessCard"), loginForm: q("#loginForm"), adminEmail: q("#adminEmail"), password: q("#password"), loginError: q("#loginError"), forgotPassword: q("#forgotPassword"), accessForm: q("#accessForm"), accessPassword: q("#accessPassword"), accessConfirmPassword: q("#accessConfirmPassword"), accessError: q("#accessError"), logout: q("#logoutButton"), refresh: q("#refreshButton"), updated: q("#lastUpdated"), nav: q("#mainNav"), sidebar: q(".sidebar"), mobileMenu: q("#mobileMenu"), viewTitle: q("#viewTitle"), viewEyebrow: q("#viewEyebrow"), currentAdminName: q("#currentAdminName"), currentAdminEmail: q("#currentAdminEmail"),
     homeView: q("#homeView"), driversView: q("#driversView"), quotesView: q("#quotesView"), emailView: q("#emailView"), usersView: q("#usersView"), usersNav: q("#usersNav"), activeCount: q("#activeCount"), phoneCount: q("#phoneCount"), docsCount: q("#docsCount"), readyCount: q("#readyCount"), navDriverCount: q("#navDriverCount"), navQuoteCount: q("#navQuoteCount"), navUserCount: q("#navUserCount"), attentionList: q("#attentionList"), homeQuoteList: q("#homeQuoteList"),
-    driverSearch: q("#driverSearch"), driverTypeFilter: q("#driverTypeFilter"), documentFilter: q("#documentFilter"), phoneColumn: q("#phoneColumn"), docsColumn: q("#docsColumn"), readyColumn: q("#readyColumn"), processedColumn: q("#processedColumn"), partnerColumn: q("#partnerColumn"), callbackColumn: q("#callbackColumn"), phoneColumnCount: q("#phoneColumnCount"), docsColumnCount: q("#docsColumnCount"), readyColumnCount: q("#readyColumnCount"), processedColumnCount: q("#processedColumnCount"), partnerColumnCount: q("#partnerColumnCount"), callbackColumnCount: q("#callbackColumnCount"), archiveToggle: q("#archiveToggle"), archiveCount: q("#archiveCount"), pipeline: q("#pipeline"), archiveView: q("#archiveView"), archiveGrid: q("#archiveGrid"), activeDriverList: q("#activeDriverList"), activeDriverPayout: q("#activeDriverPayout"),
+    driverSearch: q("#driverSearch"), applicationStatusFilter: q("#applicationStatusFilter"), driverTypeFilter: q("#driverTypeFilter"), documentFilter: q("#documentFilter"), phoneColumn: q("#phoneColumn"), docsColumn: q("#docsColumn"), readyColumn: q("#readyColumn"), processedColumn: q("#processedColumn"), partnerColumn: q("#partnerColumn"), callbackColumn: q("#callbackColumn"), phoneColumnCount: q("#phoneColumnCount"), docsColumnCount: q("#docsColumnCount"), readyColumnCount: q("#readyColumnCount"), processedColumnCount: q("#processedColumnCount"), partnerColumnCount: q("#partnerColumnCount"), callbackColumnCount: q("#callbackColumnCount"), archiveToggle: q("#archiveToggle"), archiveCount: q("#archiveCount"), pipeline: q("#pipeline"), archiveView: q("#archiveView"), archiveGrid: q("#archiveGrid"), activeDriverList: q("#activeDriverList"), activeDriverPayout: q("#activeDriverPayout"),
     quoteSearch: q("#quoteSearch"), quoteStatusFilter: q("#quoteStatusFilter"), quotesBody: q("#quotesBody"), quotesEmpty: q("#quotesEmpty"), outboundEmailForm: q("#outboundEmailForm"), emailSenderProfile: q("#emailSenderProfile"), outboundTo: q("#outboundTo"), outboundSubject: q("#outboundSubject"), outboundMessage: q("#outboundMessage"), outboundEmailError: q("#outboundEmailError"), sendOutboundEmail: q("#sendOutboundEmail"), emailSettingsForm: q("#emailSettingsForm"), defaultSenderProfile: q("#defaultSenderProfile"), defaultReplyTo: q("#defaultReplyTo"), emailSettingsError: q("#emailSettingsError"), outboundEmailHistory: q("#outboundEmailHistory"), partnerDialog: q("#partnerDialog"), partnerForm: q("#partnerForm"), partnerDriverName: q("#partnerDriverName"), partnerCompany: q("#partnerCompany"), partnerNote: q("#partnerNote"), partnerError: q("#partnerError"), confirmPartner: q("#confirmPartner"), activateDialog: q("#activateDialog"), activateForm: q("#activateForm"), activateDriverName: q("#activateDriverName"), driverPayout: q("#driverPayout"), driverStartDate: q("#driverStartDate"), paymentDelayWeeks: q("#paymentDelayWeeks"), activateError: q("#activateError"), confirmActivate: q("#confirmActivate"), userForm: q("#userForm"), userFullName: q("#userFullName"), userEmail: q("#userEmail"), userError: q("#userError"), inviteUserButton: q("#inviteUserButton"), adminUserList: q("#adminUserList"), bootstrapNotice: q("#bootstrapNotice"),
   };
 
@@ -42,21 +42,49 @@
     const button = element("button", className, label); button.type = "button"; button.dataset.action = action; button.disabled = disabled; return button;
   }
 
+  function answerLabel(value, labels = {}) { return labels[value] || value || "Not answered"; }
+  function applicationDetails(app) {
+    const details = element("details", "application-details"), summary = element("summary", "", "View application details"), list = element("dl", "application-detail-list");
+    const rows = [
+      ["Status", app.status === "draft" ? "Incomplete" : "Submitted"],
+      ["Driving experience", answerLabel(app.experience, experience)],
+      ["Gender", answerLabel(app.gender, { female: "Female", male: "Male", non_binary: "Non-binary", prefer_not_to_say: "Prefer not to say" })],
+    ];
+    if (app.driver_type === "owner_operator") rows.push(
+      ["Truck year", answerLabel(app.truck_year)],
+      ["Truck mileage", app.truck_mileage ? `${Number(app.truck_mileage).toLocaleString()} miles` : "Not answered"],
+      ["Has truck plate", answerLabel(app.has_plate, { yes: "Yes", no: "No" })],
+    );
+    else rows.push(
+      ["Amazon Relay experience", answerLabel(app.amazon_relay_experience, { yes: "Yes", no: "No" })],
+      ["Start availability", answerLabel(app.start_availability, { tomorrow: "Tomorrow", this_week: "This week", more_than_week: "More than a week" })],
+    );
+    rows.push(["Last updated", readableDate(app.updated_at, true)]);
+    for (const [label, value] of rows) { list.append(element("dt", "", label), element("dd", "", value)); }
+    details.append(summary, list); return details;
+  }
+
   function driverCard(app, archived = false) {
     const card = element("article", "driver-card"); card.dataset.id = app.id;
     const top = element("div", "driver-card-top"), identity = element("div"), name = element("h4", "", app.full_name || "Name not entered"), type = element("span", "type", app.driver_type === "owner_operator" ? "Owner-operator" : "Company driver"), age = element("span", "age", readableDate(app.submitted_at || app.updated_at));
-    identity.append(name, type); top.append(identity, app.sent_at ? element("span", "sent-pill", "Sent") : age);
+    identity.append(name, type);
+    const status = element("div", "application-status");
+    if (app.status === "draft") status.append(element("span", "incomplete-pill", "Incomplete"), age);
+    else status.append(app.sent_at ? element("span", "sent-pill", "Sent") : age);
+    top.append(identity, status);
     const contact = element("div", "contact");
     if (app.phone) { const phone = element("a", "", app.phone); phone.href = `tel:${app.phone}`; contact.append(phone); }
     if (app.email) { const email = element("a", "", app.email); email.href = `mailto:${app.email}`; contact.append(email); }
     const docs = element("div", "doc-checks"); docs.append(documentBadge("CDL", Boolean(app.cdl_document_uploaded_at)), documentBadge("Medical card", Boolean(app.medical_card_uploaded_at), isExpired(app)));
     card.append(top, contact, docs);
+    if (app.status === "draft") card.append(element("p", "incomplete-note", "This applicant started the form but has not submitted it yet."));
     if (app.medical_card_expiration) card.append(element("p", "driver-note", `Medical card expires ${readableDate(app.medical_card_expiration)}${isExpired(app) ? " — expired" : ""}`));
     if (app.partner_company) card.append(element("p", "driver-note", `Sold / hired to ${app.partner_company}${app.partner_note ? ` — ${app.partner_note}` : ""}`));
+    card.append(applicationDetails(app));
     const actions = element("div", "driver-actions");
     if (archived) {
       actions.append(actionButton("Restore", "next", "restore"));
-    } else {
+    } else if (app.status === "submitted") {
       const stage = applicationStage(app);
       if (app.cdl_document_uploaded_at) actions.append(documentLink(app, "cdl", "View CDL"));
       if (app.medical_card_uploaded_at) actions.append(documentLink(app, "medical-card", "View medical card"));
@@ -73,14 +101,14 @@
       if (stage === "callback_hired") actions.append(actionButton("Add active driver", "next", "activate-driver"));
       actions.append(actionButton("Archive", "archive", "archive"));
     }
-    card.append(actions); return card;
+    if (actions.childElementCount) card.append(actions); return card;
   }
 
   function documentLink(app, kind, label) { const link = element("a", "", label); link.href = `${window.WCX_API_ORIGIN || ""}/api/admin/applications/${app.id}/documents/${kind}`; link.target = "_blank"; link.rel = "noopener"; return link; }
 
   function filteredApplications(archived) {
-    const search = ui.driverSearch.value.trim().toLowerCase(), type = ui.driverTypeFilter.value, doc = ui.documentFilter.value;
-    return applications.filter((app) => app.status === "submitted" && Boolean(app.archived_at) === archived && (!search || [app.full_name, app.phone, app.email].some((value) => String(value || "").toLowerCase().includes(search))) && (type === "all" || app.driver_type === type) && (doc === "all" || (doc === "missing_cdl" && !app.cdl_document_uploaded_at) || (doc === "missing_medical" && !app.medical_card_uploaded_at) || (doc === "complete" && app.cdl_document_uploaded_at && app.medical_card_uploaded_at) || (doc === "expired" && isExpired(app))));
+    const search = ui.driverSearch.value.trim().toLowerCase(), status = ui.applicationStatusFilter.value, type = ui.driverTypeFilter.value, doc = ui.documentFilter.value;
+    return applications.filter((app) => (app.status === "draft" || app.status === "submitted") && Boolean(app.archived_at) === archived && (!archived || app.status === "submitted") && (status === "all" || app.status === status) && (!search || [app.full_name, app.phone, app.email].some((value) => String(value || "").toLowerCase().includes(search))) && (type === "all" || app.driver_type === type) && (doc === "all" || (doc === "missing_cdl" && !app.cdl_document_uploaded_at) || (doc === "missing_medical" && !app.medical_card_uploaded_at) || (doc === "complete" && app.cdl_document_uploaded_at && app.medical_card_uploaded_at) || (doc === "expired" && isExpired(app))));
   }
 
   function renderDrivers() {
@@ -113,9 +141,9 @@
   function attentionItem(title, detail, badge, quote = false) { const item = element("article", "attention-item"), copy = element("div"), strong = element("strong", "", title), p = element("p", "", detail), state = element("span", quote ? "quote-state" : "", badge); copy.append(strong, p); item.append(copy, state); return item; }
 
   function renderHome() {
-    const active = applications.filter((app) => app.status === "submitted" && !app.archived_at), phone = active.filter((app) => applicationStage(app) === "phone_screen"), docs = active.filter((app) => applicationStage(app) === "docs_requested"), ready = active.filter((app) => applicationStage(app) === "docs_received");
+    const active = applications.filter((app) => (app.status === "draft" || app.status === "submitted") && !app.archived_at), phone = active.filter((app) => applicationStage(app) === "phone_screen"), docs = active.filter((app) => applicationStage(app) === "docs_requested"), ready = active.filter((app) => applicationStage(app) === "docs_received");
     ui.activeCount.textContent = active.length; ui.phoneCount.textContent = phone.length; ui.docsCount.textContent = docs.length; ui.readyCount.textContent = ready.length; ui.navDriverCount.textContent = active.length; ui.navQuoteCount.textContent = quotes.length;
-    const priority = [...phone.map((app) => attentionItem(app.full_name || "Unnamed applicant", app.phone || app.email || "Contact details pending", "Call")), ...docs.filter((app) => !app.cdl_document_uploaded_at || !app.medical_card_uploaded_at).map((app) => attentionItem(app.full_name || "Unnamed applicant", `${app.cdl_document_uploaded_at ? "CDL received" : "CDL missing"} · ${app.medical_card_uploaded_at ? "Medical card received" : "Medical card missing"}`, "Documents"))].slice(0, 6);
+    const priority = [...phone.map((app) => attentionItem(app.full_name || "Unnamed applicant", app.status === "draft" ? `Incomplete application · ${app.phone || app.email || "Contact details pending"}` : app.phone || app.email || "Contact details pending", app.status === "draft" ? "Incomplete" : "Call")), ...docs.filter((app) => !app.cdl_document_uploaded_at || !app.medical_card_uploaded_at).map((app) => attentionItem(app.full_name || "Unnamed applicant", `${app.cdl_document_uploaded_at ? "CDL received" : "CDL missing"} · ${app.medical_card_uploaded_at ? "Medical card received" : "Medical card missing"}`, "Documents"))].slice(0, 6);
     if (!priority.length) empty(ui.attentionList, "Nothing urgent right now."); else ui.attentionList.replaceChildren(...priority);
     const recentQuotes = quotes.slice(0, 6).map((quote) => attentionItem(quote.company_name || quote.full_name, `${quote.pickup_city}, ${quote.pickup_state} → ${quote.delivery_city}, ${quote.delivery_state}`, quote.status, true));
     if (!recentQuotes.length) empty(ui.homeQuoteList, "No submitted quote requests yet."); else ui.homeQuoteList.replaceChildren(...recentQuotes);
@@ -233,7 +261,7 @@
   ui.refresh.addEventListener("click", refreshAll); ui.mobileMenu.addEventListener("click", () => ui.sidebar.classList.toggle("open"));
   ui.nav.addEventListener("click", (event) => { const button = event.target.closest("[data-view]"); if (button) switchView(button.dataset.view); });
   document.addEventListener("click", (event) => { const button = event.target.closest("[data-go]"); if (button) switchView(button.dataset.go); });
-  [ui.driverSearch, ui.driverTypeFilter, ui.documentFilter].forEach((control) => control.addEventListener("input", renderDrivers));
+  [ui.driverSearch, ui.applicationStatusFilter, ui.driverTypeFilter, ui.documentFilter].forEach((control) => control.addEventListener("input", renderDrivers));
   [ui.quoteSearch, ui.quoteStatusFilter].forEach((control) => control.addEventListener("input", renderQuotes));
   ui.phoneColumn.addEventListener("click", driverAction); ui.docsColumn.addEventListener("click", driverAction); ui.readyColumn.addEventListener("click", driverAction); ui.processedColumn.addEventListener("click", driverAction); ui.partnerColumn.addEventListener("click", driverAction); ui.callbackColumn.addEventListener("click", driverAction); ui.archiveGrid.addEventListener("click", driverAction);
   ui.archiveToggle.addEventListener("click", () => { showingArchive = !showingArchive; ui.pipeline.hidden = showingArchive; ui.archiveView.hidden = !showingArchive; ui.archiveToggle.firstChild.textContent = showingArchive ? "Back to pipeline " : "View archive "; });
