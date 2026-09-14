@@ -12,6 +12,7 @@
   const viewCopy = { home: ["Recruiting overview", "Home"], drivers: ["Applicant workflow", "View drivers"], quotes: ["Freight opportunities", "Quote requests"], email: ["Company communication", "Outbound email"], users: ["Security and access", "Admin users"] };
   const experience = { under_1: "Less than 1 year", under_2: "Less than 2 years", under_5: "Less than 5 years", under_10: "Less than 10 years" };
   const stageLabels = { phone_screen: "Phone call", docs_requested: "Documents requested", docs_received: "Documents received", documents_processed: "Documents processed", sold_hired_partner: "Sold / hired for partner", callback_hired: "Call back given" };
+  const nextDraftStage = { phone_screen: "docs_requested", docs_requested: "docs_received", docs_received: "documents_processed", documents_processed: "sold_hired_partner", sold_hired_partner: "callback_hired" };
   let applications = [], activeDrivers = [], quotes = [], adminUsers = [], emailProfiles = [], outboundMessages = [], emailSettings = {}, currentAdmin = null, bootstrapSession = false, refreshTimer, activeView = "home", showingArchive = false, partnerTarget = null, activateTarget = null;
 
   function showLogin() { ui.login.hidden = false; ui.loginCard.hidden = false; ui.accessCard.hidden = true; ui.dashboard.hidden = true; clearInterval(refreshTimer); }
@@ -82,10 +83,10 @@
     if (app.partner_company) card.append(element("p", "driver-note", `Sold / hired to ${app.partner_company}${app.partner_note ? ` — ${app.partner_note}` : ""}`));
     card.append(applicationDetails(app));
     const actions = element("div", "driver-actions");
+    const stage = applicationStage(app);
     if (archived) {
       actions.append(actionButton("Restore", "next", "restore"));
     } else if (app.status === "submitted") {
-      const stage = applicationStage(app);
       if (app.cdl_document_uploaded_at) actions.append(documentLink(app, "cdl", "View CDL"));
       if (app.medical_card_uploaded_at) actions.append(documentLink(app, "medical-card", "View medical card"));
       const requestMedical = actionButton(isExpired(app) ? "Request updated medical card" : "Request medical card", "", "request-medical-card", Boolean(app.medical_card_uploaded_at) && !isExpired(app));
@@ -100,7 +101,11 @@
       if (stage === "sold_hired_partner") actions.append(actionButton("Call back given", "next", "callback-hired"));
       if (stage === "callback_hired") actions.append(actionButton("Add active driver", "next", "activate-driver"));
       actions.append(actionButton("Archive", "archive", "archive"));
-    } else actions.append(actionButton("Archive", "archive", "archive"));
+    } else {
+      const nextStage = nextDraftStage[stage];
+      if (nextStage) { const override = actionButton(`Override to ${stageLabels[nextStage]}`, "next", "manual-next"); override.dataset.nextStage = nextStage; actions.append(override); }
+      actions.append(actionButton("Archive", "archive", "archive"));
+    }
     if (actions.childElementCount) card.append(actions); return card;
   }
 
@@ -230,6 +235,11 @@
   async function driverAction(event) {
     const button = event.target.closest("button[data-action]"), card = event.target.closest("[data-id]"); if (!button || !card) return; const app = applications.find((item) => item.id === card.dataset.id); if (!app) return; button.disabled = true;
     try {
+      if (button.dataset.action === "manual-next") {
+        const nextStage = button.dataset.nextStage;
+        if (!confirm(`Are you sure? This incomplete application will move to ${stageLabels[nextStage] || "the next stage"}.`)) { button.disabled = false; return; }
+        await patchApplication(app.id, { stage: nextStage, manualOverride: true });
+      }
       if (button.dataset.action === "request-docs") await patchApplication(app.id, { stage: "docs_requested" });
       if (button.dataset.action === "docs-complete") await patchApplication(app.id, { stage: "docs_received" });
       if (button.dataset.action === "process-documents") await patchApplication(app.id, { stage: "documents_processed" });

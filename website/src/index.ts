@@ -183,6 +183,7 @@ const START_VALUES = new Set(["tomorrow", "this_week", "more_than_week"]);
 const CDL_CONTENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 const MAX_CDL_SIZE_BYTES = 5 * 1024 * 1024;
 const RECRUITING_STAGES = new Set(["phone_screen", "docs_requested", "docs_received", "documents_processed", "sold_hired_partner", "callback_hired"]);
+const NEXT_RECRUITING_STAGE: Record<string, string> = { phone_screen: "docs_requested", docs_requested: "docs_received", docs_received: "documents_processed", documents_processed: "sold_hired_partner", sold_hired_partner: "callback_hired" };
 
 function cdlExtension(contentType: string | undefined): string {
   if (contentType === "image/png") return "png";
@@ -1426,10 +1427,15 @@ async function updateRecruitingApplication(request: Request, env: Env, applicati
     const stage = body.stage;
     if (!RECRUITING_STAGES.has(stage)) return errorResponse("Invalid recruiting stage.", 400);
     const application = await env.DB.prepare(
-      "SELECT cdl_document_uploaded_at, medical_card_uploaded_at FROM applications WHERE id = ?1 AND status = 'submitted' LIMIT 1",
+      "SELECT status, recruiting_stage, cdl_document_uploaded_at, medical_card_uploaded_at FROM applications WHERE id = ?1 AND archived_at IS NULL LIMIT 1",
     ).bind(applicationId).first<ApplicationRow>();
     if (!application) return errorResponse("Application not found.", 404);
-    if (stage === "docs_received" && (!application.cdl_document_uploaded_at || !application.medical_card_uploaded_at)) {
+    const manualOverride = body?.manualOverride === true && application.status === "draft";
+    const currentStage = application.recruiting_stage || "phone_screen";
+    if (application.status === "draft" && (!manualOverride || NEXT_RECRUITING_STAGE[currentStage] !== stage)) {
+      return errorResponse("Choose the next stage and confirm the manual override.", 400);
+    }
+    if (!manualOverride && stage === "docs_received" && (!application.cdl_document_uploaded_at || !application.medical_card_uploaded_at)) {
       return errorResponse("Both the CDL and medical card must be received first.", 400);
     }
     await env.DB.prepare(
