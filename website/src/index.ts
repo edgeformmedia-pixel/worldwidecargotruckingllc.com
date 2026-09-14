@@ -28,6 +28,9 @@ type ApplicationRow = {
   recruiting_stage?: "phone_screen" | "docs_requested" | "docs_received" | "documents_processed" | "sold_hired_partner" | "callback_hired";
   talked_to_at?: string | null;
   docs_requested_at?: string | null;
+  callback_date?: string | null;
+  callback_time?: string | null;
+  callback_completed_at?: string | null;
   archived_at?: string | null;
   sent_to?: string;
   sent_at?: string | null;
@@ -1481,10 +1484,10 @@ async function listApplications(request: Request, env: Env): Promise<Response> {
   const allowedStatus = status === "draft" || status === "submitted" ? status : null;
   const statement = allowedStatus
     ? env.DB.prepare(
-      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, callback_date, callback_time, callback_completed_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
     ).bind(allowedStatus)
     : env.DB.prepare(
-      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, callback_date, callback_time, callback_completed_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
     );
   const [result, noteResult] = await Promise.all([
     statement.all<ApplicationRow>(),
@@ -1537,6 +1540,24 @@ async function updateRecruitingApplication(request: Request, env: Env, applicati
     if (result.meta.changes !== 1) return errorResponse("Application not found.", 404);
     return json({ ok: true });
   }
+  if (typeof body?.callbackDate === "string" || typeof body?.callbackTime === "string") {
+    const date = typeof body.callbackDate === "string" ? body.callbackDate.trim() : "";
+    const time = typeof body.callbackTime === "string" ? body.callbackTime.trim() : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(date) || date < currentCentralDate()) return errorResponse("Choose today or a future callback date.", 400);
+    const [year, month, day] = date.split("-").map(Number);
+    const parsedDate = new Date(Date.UTC(year, month - 1, day, 12));
+    if (parsedDate.getUTCFullYear() !== year || parsedDate.getUTCMonth() !== month - 1 || parsedDate.getUTCDate() !== day) return errorResponse("Choose a valid callback date.", 400);
+    if (!/^\d{2}:(?:00|30)$/u.test(time)) return errorResponse("Choose an available callback time.", 400);
+    const [hours, minutes] = time.split(":").map(Number);
+    const totalMinutes = hours * 60 + minutes;
+    if (totalMinutes < 9 * 60 || totalMinutes > 21 * 60) return errorResponse("Choose a time between 9:00 AM and 9:00 PM Central.", 400);
+    if (date === currentCentralDate() && totalMinutes <= currentCentralMinutes()) return errorResponse("Choose a future callback time.", 400);
+    const result = await env.DB.prepare(
+      "UPDATE applications SET callback_date = ?1, callback_time = ?2, callback_completed_at = NULL, updated_at = ?3 WHERE id = ?4 AND COALESCE(recruiting_stage, 'phone_screen') = 'phone_screen' AND archived_at IS NULL",
+    ).bind(date, time, now, applicationId).run();
+    if (result.meta.changes !== 1) return errorResponse("This driver is no longer waiting for a phone callback.", 409);
+    return json({ ok: true });
+  }
   if (typeof body?.stage === "string") {
     const stage = body.stage;
     if (!RECRUITING_STAGES.has(stage)) return errorResponse("Invalid recruiting stage.", 400);
@@ -1553,7 +1574,7 @@ async function updateRecruitingApplication(request: Request, env: Env, applicati
       return errorResponse("Both the CDL and medical card must be received first.", 400);
     }
     await env.DB.prepare(
-      "UPDATE applications SET recruiting_stage = ?1, talked_to_at = CASE WHEN ?1 != 'phone_screen' THEN COALESCE(talked_to_at, ?2) ELSE talked_to_at END, docs_requested_at = CASE WHEN ?1 = 'docs_requested' THEN COALESCE(docs_requested_at, ?2) ELSE docs_requested_at END, updated_at = ?2 WHERE id = ?3",
+      "UPDATE applications SET recruiting_stage = ?1, talked_to_at = CASE WHEN ?1 != 'phone_screen' THEN COALESCE(talked_to_at, ?2) ELSE talked_to_at END, docs_requested_at = CASE WHEN ?1 = 'docs_requested' THEN COALESCE(docs_requested_at, ?2) ELSE docs_requested_at END, callback_completed_at = CASE WHEN ?1 = 'docs_requested' AND COALESCE(recruiting_stage, 'phone_screen') = 'phone_screen' THEN ?2 ELSE callback_completed_at END, updated_at = ?2 WHERE id = ?3",
     ).bind(stage, now, applicationId).run();
     return json({ ok: true });
   }
