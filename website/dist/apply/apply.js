@@ -78,9 +78,18 @@
     { field: "start_availability", label: "Availability", title: "When can you start?", help: "Choose the earliest option that works for you.", type: "choices", options: choices.availability },
   ];
 
+  const benefitsStep = {
+    field: "benefits_needed",
+    label: "1099 trucking benefits",
+    title: "Do you need help with 1099 trucking benefits?",
+    help: "Choose Yes if you would like our benefits specialist to contact you about available benefit options.",
+    type: "choices",
+    options: [["yes", "Yes, I need help"], ["no", "No, not right now"]],
+  };
+
   function steps() {
     if (!state.driverType) return [];
-    return [...commonSteps, ...(state.driverType === "owner_operator" ? ownerSteps : companySteps), { field: "cdl_upload", label: "Optional documents", title: "Want to get ahead?", help: "You can securely upload your CDL and DOT medical card now, or continue without them.", type: "documents" }, { type: "review" }];
+    return [...commonSteps, ...(state.driverType === "owner_operator" ? ownerSteps : companySteps), benefitsStep, { field: "cdl_upload", label: "Optional documents", title: "Want to get ahead?", help: "You can securely upload your CDL and DOT medical card now, or continue without them.", type: "documents" }, { type: "review" }];
   }
 
   function persist() {
@@ -291,7 +300,7 @@
   function answerLabel(field, value) {
     if (field === "gender") return labels.gender[value] || value;
     if (field === "experience") return labels.experience[value] || value;
-    if (field === "has_plate" || field === "amazon_relay_experience") return labels.yesNo[value] || value;
+    if (field === "has_plate" || field === "amazon_relay_experience" || field === "benefits_needed") return labels.yesNo[value] || value;
     if (field === "start_availability") return labels.availability[value] || value;
     if (field === "truck_mileage" && value) return `${Number(value).toLocaleString()} miles`;
     return value || "—";
@@ -310,6 +319,7 @@
     } else {
       items.push(["Amazon Relay", answerLabel("amazon_relay_experience", state.answers.amazon_relay_experience)], ["Can start", answerLabel("start_availability", state.answers.start_availability)]);
     }
+    items.push(["Needs help with 1099 trucking benefits", answerLabel("benefits_needed", state.answers.benefits_needed)]);
     const review = document.createElement("div");
     review.className = "review";
     for (const [label, value] of items) {

@@ -15,6 +15,7 @@ type ApplicationRow = {
   has_plate: string;
   amazon_relay_experience: string;
   start_availability: string;
+  benefits_needed: string;
   current_step: number;
   status: "draft" | "submitted";
   created_at: string;
@@ -34,6 +35,15 @@ type ApplicationRow = {
   partner_note?: string;
   account_id?: string | null;
   review_status?: "new" | "reviewing" | "approved" | "declined";
+};
+
+type DriverNoteRow = {
+  id: string;
+  application_id: string;
+  admin_user_id: string | null;
+  author_name: string;
+  body: string;
+  created_at: string;
 };
 
 type AccountRow = {
@@ -174,6 +184,7 @@ const UPDATE_FIELDS = {
   has_plate: { column: "has_plate", max: 8 },
   amazon_relay_experience: { column: "amazon_relay_experience", max: 8 },
   start_availability: { column: "start_availability", max: 40 },
+  benefits_needed: { column: "benefits_needed", max: 8 },
 } as const;
 
 const EXPERIENCE_VALUES = new Set(["under_1", "under_2", "under_5", "under_10"]);
@@ -546,7 +557,7 @@ function validateField(field: keyof typeof UPDATE_FIELDS, value: string): boolea
   if (value.length > UPDATE_FIELDS[field].max) return false;
   if (field === "gender") return value === "" || GENDER_VALUES.has(value);
   if (field === "experience") return value === "" || EXPERIENCE_VALUES.has(value);
-  if (field === "has_plate" || field === "amazon_relay_experience") return value === "" || YES_NO_VALUES.has(value);
+  if (field === "has_plate" || field === "amazon_relay_experience" || field === "benefits_needed") return value === "" || YES_NO_VALUES.has(value);
   if (field === "start_availability") return value === "" || START_VALUES.has(value);
   if (field === "truck_year") return /^\d{0,4}$/u.test(value);
   if (field === "truck_mileage") return /^\d{0,12}$/u.test(value);
@@ -554,7 +565,7 @@ function validateField(field: keyof typeof UPDATE_FIELDS, value: string): boolea
 }
 
 function missingRequired(row: ApplicationRow): string[] {
-  const common: Array<keyof ApplicationRow> = ["full_name", "phone", "email", "gender", "experience"];
+  const common: Array<keyof ApplicationRow> = ["full_name", "phone", "email", "gender", "experience", "benefits_needed"];
   const roleSpecific: Array<keyof ApplicationRow> = row.driver_type === "owner_operator"
     ? ["truck_year", "truck_mileage", "has_plate"]
     : ["amazon_relay_experience", "start_availability"];
@@ -1403,13 +1414,49 @@ async function listApplications(request: Request, env: Env): Promise<Response> {
   const allowedStatus = status === "draft" || status === "submitted" ? status : null;
   const statement = allowedStatus
     ? env.DB.prepare(
-      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
     ).bind(allowedStatus)
     : env.DB.prepare(
-      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
     );
-  const result = await statement.all<ApplicationRow>();
-  return json({ ok: true, applications: result.results });
+  const [result, noteResult] = await Promise.all([
+    statement.all<ApplicationRow>(),
+    env.DB.prepare(
+      "SELECT id, application_id, admin_user_id, author_name, body, created_at FROM driver_notes ORDER BY created_at DESC LIMIT 5000",
+    ).all<DriverNoteRow>(),
+  ]);
+  const notesByApplication = new Map<string, DriverNoteRow[]>();
+  for (const note of noteResult.results) {
+    const notes = notesByApplication.get(note.application_id) ?? [];
+    notes.push(note);
+    notesByApplication.set(note.application_id, notes);
+  }
+  return json({
+    ok: true,
+    applications: result.results.map((application) => ({
+      ...application,
+      notes: notesByApplication.get(application.id) ?? [],
+    })),
+  });
+}
+
+async function createDriverNote(request: Request, env: Env, applicationId: string): Promise<Response> {
+  const principal = await hasAdminSession(request, env);
+  if (!principal) return errorResponse("Unauthorized.", 401);
+  const body = await readJson(request);
+  const noteBody = typeof body?.body === "string" ? body.body.trim() : "";
+  if (!noteBody) return errorResponse("Enter a note.", 400);
+  if (noteBody.length > 4000) return errorResponse("Keep the note under 4,000 characters.", 400);
+  const application = await env.DB.prepare("SELECT id FROM applications WHERE id = ?1 LIMIT 1")
+    .bind(applicationId).first<{ id: string }>();
+  if (!application) return errorResponse("Driver application not found.", 404);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    "INSERT INTO driver_notes (id, application_id, admin_user_id, author_name, body, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+  ).bind(id, applicationId, principal.id, principal.fullName, noteBody, now).run();
+  await auditAdmin(env, principal, "driver.note_added", "application", applicationId, `Note ${id}`);
+  return json({ ok: true, note: { id, application_id: applicationId, admin_user_id: principal.id, author_name: principal.fullName, body: noteBody, created_at: now } }, 201);
 }
 
 async function updateRecruitingApplication(request: Request, env: Env, applicationId: string): Promise<Response> {
@@ -1623,6 +1670,8 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   const adminApplicationMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})$/u);
   if (adminApplicationMatch && request.method === "PATCH") return updateRecruitingApplication(request, env, adminApplicationMatch[1]);
   if (adminApplicationMatch && request.method === "DELETE") return deleteApplication(request, env, adminApplicationMatch[1]);
+  const driverNoteMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/notes$/u);
+  if (driverNoteMatch && request.method === "POST") return createDriverNote(request, env, driverNoteMatch[1]);
   const activeDriverApplicationMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/activate$/u);
   if (activeDriverApplicationMatch && request.method === "POST") return activateDriver(request, env, activeDriverApplicationMatch[1]);
   const activeDriverMatch = path.match(/^\/api\/admin\/active-drivers\/([0-9a-f-]{36})\/off$/u);
