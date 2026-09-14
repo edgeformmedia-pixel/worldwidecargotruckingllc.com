@@ -100,7 +100,7 @@
       if (stage === "sold_hired_partner") actions.append(actionButton("Call back given", "next", "callback-hired"));
       if (stage === "callback_hired") actions.append(actionButton("Add active driver", "next", "activate-driver"));
       actions.append(actionButton("Archive", "archive", "archive"));
-    }
+    } else actions.append(actionButton("Archive", "archive", "archive"));
     if (actions.childElementCount) card.append(actions); return card;
   }
 
@@ -108,7 +108,7 @@
 
   function filteredApplications(archived) {
     const search = ui.driverSearch.value.trim().toLowerCase(), status = ui.applicationStatusFilter.value, type = ui.driverTypeFilter.value, doc = ui.documentFilter.value;
-    return applications.filter((app) => (app.status === "draft" || app.status === "submitted") && Boolean(app.archived_at) === archived && (!archived || app.status === "submitted") && (status === "all" || app.status === status) && (!search || [app.full_name, app.phone, app.email].some((value) => String(value || "").toLowerCase().includes(search))) && (type === "all" || app.driver_type === type) && (doc === "all" || (doc === "missing_cdl" && !app.cdl_document_uploaded_at) || (doc === "missing_medical" && !app.medical_card_uploaded_at) || (doc === "complete" && app.cdl_document_uploaded_at && app.medical_card_uploaded_at) || (doc === "expired" && isExpired(app))));
+    return applications.filter((app) => (app.status === "draft" || app.status === "submitted") && Boolean(app.archived_at) === archived && (status === "all" || app.status === status) && (!search || [app.full_name, app.phone, app.email].some((value) => String(value || "").toLowerCase().includes(search))) && (type === "all" || app.driver_type === type) && (doc === "all" || (doc === "missing_cdl" && !app.cdl_document_uploaded_at) || (doc === "missing_medical" && !app.medical_card_uploaded_at) || (doc === "complete" && app.cdl_document_uploaded_at && app.medical_card_uploaded_at) || (doc === "expired" && isExpired(app))));
   }
 
   function renderDrivers() {
@@ -116,7 +116,7 @@
     active.forEach((app) => groups[applicationStage(app)].push(app));
     const columns = [[ui.phoneColumn, ui.phoneColumnCount, groups.phone_screen, "No applicants are waiting for a call."], [ui.docsColumn, ui.docsColumnCount, groups.docs_requested, "No applicants are waiting on documents."], [ui.readyColumn, ui.readyColumnCount, groups.docs_received, "No complete driver packets yet."], [ui.processedColumn, ui.processedColumnCount, groups.documents_processed, "No processed driver packets yet."], [ui.partnerColumn, ui.partnerColumnCount, groups.sold_hired_partner, "No partner hires recorded yet."], [ui.callbackColumn, ui.callbackColumnCount, groups.callback_hired, "No callbacks ready to activate."]];
     for (const [container, count, items, message] of columns) { count.textContent = items.length; if (!items.length) empty(container, message); else container.replaceChildren(...items.map((app) => driverCard(app))); }
-    ui.archiveCount.textContent = applications.filter((app) => app.status === "submitted" && app.archived_at).length;
+    ui.archiveCount.textContent = applications.filter((app) => (app.status === "draft" || app.status === "submitted") && app.archived_at).length;
     if (!archived.length) empty(ui.archiveGrid, "No archived applicants match these filters."); else ui.archiveGrid.replaceChildren(...archived.map((app) => driverCard(app, true)));
     renderActiveDrivers();
   }

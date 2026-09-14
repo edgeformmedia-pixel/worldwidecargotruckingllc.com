@@ -1417,7 +1417,7 @@ async function updateRecruitingApplication(request: Request, env: Env, applicati
   const now = new Date().toISOString();
   if (body?.archive === true || body?.archive === false) {
     const archivedAt = body.archive ? now : null;
-    const result = await env.DB.prepare("UPDATE applications SET archived_at = ?1, updated_at = ?2 WHERE id = ?3 AND status = 'submitted'")
+    const result = await env.DB.prepare("UPDATE applications SET archived_at = ?1, updated_at = ?2 WHERE id = ?3 AND status IN ('draft', 'submitted')")
       .bind(archivedAt, now, applicationId).run();
     if (result.meta.changes !== 1) return errorResponse("Application not found.", 404);
     return json({ ok: true });
