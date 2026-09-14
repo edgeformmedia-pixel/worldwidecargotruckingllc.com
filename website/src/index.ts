@@ -1031,6 +1031,73 @@ async function submitQuote(request: Request, env: Env, id: string): Promise<Resp
   return json({ ok: true, accountStatus: account.status, email: account.email, submittedAt: now });
 }
 
+function callbackTimeLabel(time: string): string {
+  const [hourText, minute] = time.split(":");
+  const hour = Number(hourText);
+  return `${hour % 12 || 12}:${minute} ${hour >= 12 ? "PM" : "AM"}`;
+}
+
+function callbackDateLabel(date: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "America/Chicago" })
+    .format(new Date(Date.UTC(year, month - 1, day, 12)));
+}
+
+function currentCentralDate(): string {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" })
+    .formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function currentCentralMinutes(): number {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return Number(values.hour) * 60 + Number(values.minute);
+}
+
+async function createCallback(request: Request, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  const fullName = typeof body?.name === "string" ? body.name.trim() : "";
+  const phone = typeof body?.phone === "string" ? body.phone.trim() : "";
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const date = typeof body?.date === "string" ? body.date.trim() : "";
+  const time = typeof body?.time === "string" ? body.time.trim() : "";
+  if (!fullName || fullName.length > 120) return errorResponse("Enter your name.", 400);
+  if (!phone || phone.length > 30 || !/[0-9]{7}/u.test(phone.replace(/\D/gu, ""))) return errorResponse("Enter a valid phone number.", 400);
+  if (email && (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email) || email.length > 180)) return errorResponse("Enter a valid email address.", 400);
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(date) || date < currentCentralDate()) return errorResponse("Choose today or a future date.", 400);
+  const [year, month, day] = date.split("-").map(Number);
+  const parsedDate = new Date(Date.UTC(year, month - 1, day, 12));
+  if (parsedDate.getUTCFullYear() !== year || parsedDate.getUTCMonth() !== month - 1 || parsedDate.getUTCDate() !== day) return errorResponse("Choose a valid callback date.", 400);
+  if (!/^\d{2}:(?:00|30)$/u.test(time)) return errorResponse("Choose an available callback time.", 400);
+  const [hours, minutes] = time.split(":").map(Number);
+  const totalMinutes = hours * 60 + minutes;
+  if (totalMinutes < 9 * 60 || totalMinutes > 21 * 60) return errorResponse("Choose a time between 9:00 AM and 9:00 PM Central.", 400);
+  if (date === currentCentralDate() && totalMinutes <= currentCentralMinutes()) return errorResponse("Choose a future callback time.", 400);
+
+  const id = crypto.randomUUID();
+  await env.DB.prepare("INSERT INTO callback_requests (id, full_name, phone, email, callback_date, callback_time) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
+    .bind(id, fullName, phone, email, date, time).run();
+  const dateLabel = callbackDateLabel(date);
+  const timeLabel = callbackTimeLabel(time);
+  const safeName = escapeHtml(fullName);
+  const safePhone = escapeHtml(phone);
+  const safeEmail = escapeHtml(email || "Not provided");
+  try {
+    await sendEmail(env, {
+      to: "hr.worldwideuz@gmail.com",
+      subject: `Callback requested: ${dateLabel} at ${timeLabel}`,
+      html: emailShell("New callback request", `<strong>Name:</strong> ${safeName}<br><strong>Phone:</strong> ${safePhone}<br><strong>Email:</strong> ${safeEmail}<br><strong>Requested time:</strong> ${escapeHtml(dateLabel)} at ${escapeHtml(timeLabel)} Central`),
+      text: `New callback request\n\nName: ${fullName}\nPhone: ${phone}\nEmail: ${email || "Not provided"}\nRequested time: ${dateLabel} at ${timeLabel} Central`,
+    });
+  } catch {
+    console.error(JSON.stringify({ message: "callback notification email failed", callbackId: id }));
+  }
+  return json({ ok: true, id, dateLabel, timeLabel }, 201);
+}
+
 async function adminQuotes(request: Request, env: Env): Promise<Response> {
   if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
   const [quotes, drivers, offers] = await env.DB.batch([
@@ -1623,6 +1690,8 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   const quoteMatch = path.match(/^\/api\/quotes\/([0-9a-f-]{36})(?:\/(submit))?$/u);
   if (quoteMatch && request.method === "PATCH" && !quoteMatch[2]) return updateQuote(request, env, quoteMatch[1]);
   if (quoteMatch && request.method === "POST" && quoteMatch[2] === "submit") return submitQuote(request, env, quoteMatch[1]);
+
+  if (request.method === "POST" && path === "/api/callbacks") return createCallback(request, env);
 
   if (request.method === "POST" && path === "/api/account/activate") return activateAccount(request, env);
   if (request.method === "POST" && path === "/api/account/register") return registerAccount(request, env);
