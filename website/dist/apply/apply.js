@@ -52,7 +52,7 @@
       ["female", "Female"], ["male", "Male"], ["non_binary", "Non-binary"], ["prefer_not_to_say", "Prefer not to say"],
     ],
     experience: [
-      ["under_1", "Less than 1 year"], ["1_plus", "1+ year"], ["2_plus", "2+ years"], ["3_plus", "3+ years"], ["4_plus", "4+ years"],
+      ["under_1", "Less than 1 year"], ["under_2", "Less than 2 years"], ["under_5", "Less than 5 years"], ["under_10", "Less than 10 years"],
     ],
     yesNo: [["yes", "Yes"], ["no", "No"]],
     availability: [["tomorrow", "Tomorrow"], ["this_week", "This week"], ["more_than_week", "More than a week from now"]],
@@ -283,7 +283,7 @@
   const labels = {
     driverType: { owner_operator: "Owner-operator", company_driver: "Company driver" },
     gender: { female: "Female", male: "Male", non_binary: "Non-binary", prefer_not_to_say: "Prefer not to say" },
-    experience: { under_1: "Less than 1 year", "1_plus": "1+ year", "2_plus": "2+ years", "3_plus": "3+ years", "4_plus": "4+ years" },
+    experience: { under_1: "Less than 1 year", under_2: "Less than 2 years", under_5: "Less than 5 years", under_10: "Less than 10 years" },
     yesNo: { yes: "Yes", no: "No" },
     availability: { tomorrow: "Tomorrow", this_week: "This week", more_than_week: "More than a week" },
   };
