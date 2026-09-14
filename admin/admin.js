@@ -121,11 +121,12 @@
     const actions = element("div", "driver-actions");
     actions.append(actionButton("Add note", "", "add-note"));
     if (!archived && stage === "phone_screen") actions.append(actionButton(app.callback_date && !app.callback_completed_at ? "Reschedule callback" : "Set callback", "", "schedule-callback"));
+    // Keep uploaded documents accessible after the applicant changes stages.
+    if (app.cdl_document_uploaded_at) actions.append(documentLink(app, "cdl", "View CDL"));
+    if (app.medical_card_uploaded_at) actions.append(documentLink(app, "medical-card", "View medical card"));
     if (archived) {
       actions.append(actionButton("Restore", "next", "restore"));
     } else if (app.status === "submitted") {
-      if (app.cdl_document_uploaded_at) actions.append(documentLink(app, "cdl", "View CDL"));
-      if (app.medical_card_uploaded_at) actions.append(documentLink(app, "medical-card", "View medical card"));
       const requestMedical = actionButton(isExpired(app) ? "Request updated medical card" : "Request medical card", "", "request-medical-card", Boolean(app.medical_card_uploaded_at) && !isExpired(app));
       if (!app.email) { requestMedical.disabled = true; requestMedical.title = "Applicant email is missing"; }
       actions.append(requestMedical);
