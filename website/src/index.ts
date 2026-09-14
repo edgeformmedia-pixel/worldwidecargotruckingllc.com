@@ -174,7 +174,7 @@ const UPDATE_FIELDS = {
   start_availability: { column: "start_availability", max: 40 },
 } as const;
 
-const EXPERIENCE_VALUES = new Set(["under_1", "1_plus", "2_plus", "3_plus", "4_plus"]);
+const EXPERIENCE_VALUES = new Set(["under_1", "under_2", "under_5", "under_10"]);
 const GENDER_VALUES = new Set(["female", "male", "non_binary", "prefer_not_to_say"]);
 const YES_NO_VALUES = new Set(["yes", "no"]);
 const START_VALUES = new Set(["tomorrow", "this_week", "more_than_week"]);
@@ -1289,6 +1289,23 @@ async function addEmployeeEmailAccess(request: Request, env: Env, adminId: strin
   return json({ ok: true }, 201);
 }
 
+async function removeEmployeeEmailAccess(request: Request, env: Env, adminId: string, profileId: string): Promise<Response> {
+  const principal = await hasAdminSession(request, env);
+  if (!principal) return errorResponse("Unauthorized.", 401);
+  if (!isMaster(principal)) return errorResponse("Only the Master Admin can manage employee email access.", 403);
+  const employee = await env.DB.prepare("SELECT id, sender_profile_id FROM admin_users WHERE id = ?1 AND role = 'employee' LIMIT 1").bind(adminId).first<Pick<AdminUserRow, "id" | "sender_profile_id">>();
+  if (!employee) return errorResponse("Employee not found.", 404);
+  const access = await env.DB.prepare("SELECT 1 FROM employee_email_access WHERE admin_user_id = ?1 AND sender_profile_id = ?2 LIMIT 1").bind(employee.id, profileId).first();
+  if (!access) return errorResponse("That email access was not found.", 404);
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM employee_email_access WHERE admin_user_id = ?1 AND sender_profile_id = ?2").bind(employee.id, profileId),
+    ...(employee.sender_profile_id === profileId ? [env.DB.prepare("UPDATE admin_users SET sender_profile_id = NULL, updated_at = ?1 WHERE id = ?2").bind(now, employee.id)] : []),
+  ]);
+  await auditAdmin(env, principal, "email.access_removed", "admin_user", employee.id, profileId);
+  return json({ ok: true });
+}
+
 async function updateAdminUser(request: Request, env: Env, adminId: string): Promise<Response> {
   const principal = await hasAdminSession(request, env);
   if (!principal) return errorResponse("Unauthorized.", 401);
@@ -1521,6 +1538,8 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   if (adminUserInviteMatch && request.method === "POST") return resendAdminInvite(request, env, adminUserInviteMatch[1]);
   const adminUserEmailAccessMatch = path.match(/^\/api\/admin\/users\/([0-9a-f-]{36})\/email-access$/u);
   if (adminUserEmailAccessMatch && request.method === "POST") return addEmployeeEmailAccess(request, env, adminUserEmailAccessMatch[1]);
+  const adminUserEmailAccessProfileMatch = path.match(/^\/api\/admin\/users\/([0-9a-f-]{36})\/email-access\/([^/]+)$/u);
+  if (adminUserEmailAccessProfileMatch && request.method === "DELETE") return removeEmployeeEmailAccess(request, env, adminUserEmailAccessProfileMatch[1], decodeURIComponent(adminUserEmailAccessProfileMatch[2]));
   const adminUserMatch = path.match(/^\/api\/admin\/users\/([0-9a-f-]{36})$/u);
   if (adminUserMatch && request.method === "PATCH") return updateAdminUser(request, env, adminUserMatch[1]);
   if (adminUserMatch && request.method === "DELETE") return deleteAdminUser(request, env, adminUserMatch[1]);
