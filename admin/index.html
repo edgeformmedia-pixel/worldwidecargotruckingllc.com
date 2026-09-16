@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
   <title>Recruiting Admin | Worldwide Cargo Express</title>
-  <link rel="stylesheet" href="../admin/admin.css?v=20260914-3"><script src="../api-client.js?v=20260912-5"></script><script src="../admin/admin.js?v=20260914-6" defer></script><script src="../i18n.js" defer></script>
+  <link rel="stylesheet" href="../admin/admin.css?v=20260916-1"><script src="../api-client.js?v=20260912-5"></script><script src="../admin/admin.js?v=20260916-1" defer></script><script src="../i18n.js" defer></script>
 </head>
 <body>
   <section class="login-screen" id="loginView">
@@ -34,7 +34,7 @@
       <section class="view active-view" id="homeView">
         <div class="welcome-row"><div><h2>Keep every driver moving.</h2><p>See what needs attention and move applicants through one clear process.</p></div><button class="button primary" type="button" data-go="drivers">View driver pipeline</button></div>
         <div class="stats">
-          <article class="stat"><span>Active applicants</span><strong id="activeCount">0</strong><small>Across all six stages</small></article><article class="stat"><span>Waiting for a call</span><strong id="phoneCount">0</strong><small>New applicants to contact</small></article><article class="stat"><span>Waiting on documents</span><strong id="docsCount">0</strong><small>CDL or medical card missing</small></article><article class="stat accent"><span>Documents received</span><strong id="readyCount">0</strong><small>Ready for processing</small></article>
+          <article class="stat"><span>Active applicants</span><strong id="activeCount">0</strong><small>Across all seven stages</small></article><article class="stat"><span>Waiting for a call</span><strong id="phoneCount">0</strong><small>New applicants to contact</small></article><article class="stat"><span>Waiting on documents</span><strong id="docsCount">0</strong><small>CDL or medical card missing</small></article><article class="stat accent"><span>Documents received</span><strong id="readyCount">0</strong><small>Ready for processing</small></article>
         </div>
         <div class="home-grid">
           <section class="home-panel"><div class="panel-head"><div><p class="eyebrow">Priority queue</p><h3>Needs attention</h3></div><button class="text-button" type="button" data-go="drivers">See all</button></div><div class="attention-list" id="attentionList"></div></section>
@@ -43,7 +43,7 @@
       </section>
 
       <section class="view" id="driversView" hidden>
-        <div class="view-intro"><div><h2>Driver pipeline</h2><p>Track each applicant through documents, partner hire, callback, and activation.</p></div><button class="button secondary" id="archiveToggle" type="button">View archive <span id="archiveCount">0</span></button></div>
+        <div class="view-intro"><div><h2>Driver pipeline</h2><p>Track each applicant through documents, partner hire, callback, orientation, and activation.</p></div><button class="button secondary" id="archiveToggle" type="button">View archive <span id="archiveCount">0</span></button></div>
         <div class="toolbar"><label class="search"><span class="sr-only">Search drivers</span><input id="driverSearch" type="search" placeholder="Search name, phone, email, or notes"></label><label><span class="sr-only">Application status</span><select id="applicationStatusFilter"><option value="all">All applications</option><option value="draft">Incomplete applications</option><option value="submitted">Submitted applications</option></select></label><label><span class="sr-only">Driver type</span><select id="driverTypeFilter"><option value="all">All driver types</option><option value="owner_operator">Owner-operators</option><option value="company_driver">Company drivers</option></select></label><label><span class="sr-only">Document status</span><select id="documentFilter"><option value="all">All document statuses</option><option value="missing_cdl">Missing CDL</option><option value="missing_medical">Missing medical card</option><option value="complete">Documents complete</option><option value="expired">Medical card expired</option></select></label></div>
         <div class="pipeline" id="pipeline">
           <section class="pipeline-column stage-phone"><header><div><span class="step-number">1</span><div><h3>Talk on phone</h3><p>New applicants to contact</p></div></div><b id="phoneColumnCount">0</b></header><div class="card-list" id="phoneColumn"></div></section>
@@ -51,7 +51,8 @@
           <section class="pipeline-column stage-ready"><header><div><span class="step-number">3</span><div><h3>Documents received</h3><p>Ready to be processed</p></div></div><b id="readyColumnCount">0</b></header><div class="card-list" id="readyColumn"></div></section>
           <section class="pipeline-column stage-processed"><header><div><span class="step-number">4</span><div><h3>Documents processed</h3><p>Packet is ready for partner</p></div></div><b id="processedColumnCount">0</b></header><div class="card-list" id="processedColumn"></div></section>
           <section class="pipeline-column stage-partner"><header><div><span class="step-number">5</span><div><h3>Sold / hired for partner</h3><p>Record the company hired to</p></div></div><b id="partnerColumnCount">0</b></header><div class="card-list" id="partnerColumn"></div></section>
-          <section class="pipeline-column stage-callback"><header><div><span class="step-number">6</span><div><h3>Call back given to be hired</h3><p>Enter payout, then activate</p></div></div><b id="callbackColumnCount">0</b></header><div class="card-list" id="callbackColumn"></div></section>
+          <section class="pipeline-column stage-callback"><header><div><span class="step-number">6</span><div><h3>Call back given to be hired</h3><p>Waiting on orientation</p></div></div><b id="callbackColumnCount">0</b></header><div class="card-list" id="callbackColumn"></div></section>
+          <section class="pipeline-column stage-orientation"><header><div><span class="step-number">7</span><div><h3>Orientation complete</h3><p>Enter payout, then activate</p></div></div><b id="orientationColumnCount">0</b></header><div class="card-list" id="orientationColumn"></div></section>
         </div>
         <section class="active-drivers-panel"><div class="panel-head"><div><p class="eyebrow">Accounting</p><h3>Active drivers</h3></div><div class="accounting-total"><span>Expected payout from active drivers</span><strong id="activeDriverPayout">$0.00</strong></div></div><p class="accounting-note">Payout is recorded before activation. Expected payment is calculated one or two weeks after the driver start date.</p><div class="active-driver-list" id="activeDriverList"></div></section>
         <section class="archive-view" id="archiveView" hidden><div class="archive-head"><div><p class="eyebrow">Saved records</p><h3>Archived applicants</h3></div><p>These applicants are out of the active pipeline, but their information is still available.</p></div><div class="archive-grid" id="archiveGrid"></div></section>

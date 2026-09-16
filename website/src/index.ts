@@ -31,6 +31,7 @@ type ApplicationRow = {
   callback_date?: string | null;
   callback_time?: string | null;
   callback_completed_at?: string | null;
+  orientation_completed_at?: string | null;
   archived_at?: string | null;
   sent_to?: string;
   sent_at?: string | null;
@@ -957,7 +958,7 @@ async function accountDashboard(request: Request, env: Env): Promise<Response> {
   const account = await currentAccount(request, env);
   if (!account) return errorResponse("Unauthorized.", 401);
   const [applications, quotes, offers] = await env.DB.batch([
-    env.DB.prepare("SELECT id, driver_type, status, review_status, recruiting_stage, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, created_at, updated_at, submitted_at FROM applications WHERE account_id = ?1 ORDER BY updated_at DESC LIMIT 50").bind(account.id),
+    env.DB.prepare("SELECT id, driver_type, status, review_status, recruiting_stage, orientation_completed_at, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, created_at, updated_at, submitted_at FROM applications WHERE account_id = ?1 ORDER BY updated_at DESC LIMIT 50").bind(account.id),
     env.DB.prepare("SELECT id, requester_type, pickup_city, pickup_state, delivery_city, delivery_state, equipment, commodity, status, created_at, updated_at, submitted_at FROM quotes WHERE account_id = ?1 ORDER BY updated_at DESC LIMIT 100").bind(account.id),
     env.DB.prepare("SELECT o.id, o.quote_id, o.offered_rate_cents, o.notes, o.status, o.created_at, q.pickup_city, q.pickup_state, q.delivery_city, q.delivery_state, q.equipment, q.commodity FROM driver_offers o JOIN quotes q ON q.id = o.quote_id WHERE o.driver_account_id = ?1 ORDER BY o.updated_at DESC LIMIT 100").bind(account.id),
   ]);
@@ -1484,10 +1485,10 @@ async function listApplications(request: Request, env: Env): Promise<Response> {
   const allowedStatus = status === "draft" || status === "submitted" ? status : null;
   const statement = allowedStatus
     ? env.DB.prepare(
-      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, callback_date, callback_time, callback_completed_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, callback_date, callback_time, callback_completed_at, orientation_completed_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
     ).bind(allowedStatus)
     : env.DB.prepare(
-      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, callback_date, callback_time, callback_completed_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, callback_date, callback_time, callback_completed_at, orientation_completed_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
     );
   const [result, noteResult] = await Promise.all([
     statement.all<ApplicationRow>(),
@@ -1578,6 +1579,13 @@ async function updateRecruitingApplication(request: Request, env: Env, applicati
     ).bind(stage, now, applicationId).run();
     return json({ ok: true });
   }
+  if (body?.orientationComplete === true || body?.orientationComplete === false) {
+    const result = await env.DB.prepare(
+      "UPDATE applications SET orientation_completed_at = ?1, updated_at = ?2 WHERE id = ?3 AND status = 'submitted' AND recruiting_stage = 'callback_hired' AND archived_at IS NULL",
+    ).bind(body.orientationComplete ? now : null, now, applicationId).run();
+    if (result.meta.changes !== 1) return errorResponse("Driver must be at step 6 before completing orientation.", 404);
+    return json({ ok: true });
+  }
   if (typeof body?.partnerCompany === "string") {
     const partnerCompany = body.partnerCompany.trim();
     const partnerNote = typeof body?.partnerNote === "string" ? body.partnerNote.trim() : "";
@@ -1610,9 +1618,9 @@ async function activateDriver(request: Request, env: Env, applicationId: string)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || Number.isNaN(Date.parse(`${startDate}T00:00:00Z`))) return errorResponse("Enter a valid driver start date.", 400);
   if (delayWeeks !== 1 && delayWeeks !== 2) return errorResponse("Choose whether payment is due one or two weeks after the driver starts.", 400);
   const application = await env.DB.prepare(
-    "SELECT id FROM applications WHERE id = ?1 AND status = 'submitted' AND recruiting_stage = 'callback_hired' AND archived_at IS NULL LIMIT 1",
+    "SELECT id FROM applications WHERE id = ?1 AND status = 'submitted' AND recruiting_stage = 'callback_hired' AND orientation_completed_at IS NOT NULL AND archived_at IS NULL LIMIT 1",
   ).bind(applicationId).first<{ id: string }>();
-  if (!application) return errorResponse("Driver must be at step 6 before becoming active.", 400);
+  if (!application) return errorResponse("Driver must complete orientation (step 7) before becoming active.", 400);
   const due = new Date(`${startDate}T00:00:00Z`);
   due.setUTCDate(due.getUTCDate() + delayWeeks * 7);
   const expectedPaymentDate = due.toISOString().slice(0, 10);
