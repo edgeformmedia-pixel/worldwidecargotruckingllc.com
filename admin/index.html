@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
   <title>Recruiting Admin | Worldwide Cargo Express</title>
-  <link rel="stylesheet" href="../admin/admin.css?v=20260916-1"><script src="../api-client.js?v=20260912-5"></script><script src="../admin/admin.js?v=20260916-1" defer></script><script src="../i18n.js" defer></script>
+  <link rel="stylesheet" href="../admin/admin.css?v=20260916-2"><script src="../api-client.js?v=20260912-5"></script><script src="../admin/admin.js?v=20260916-2" defer></script><script src="../i18n.js" defer></script>
 </head>
 <body>
   <section class="login-screen" id="loginView">
@@ -22,6 +22,7 @@
         <button class="nav-item" type="button" data-view="quotes"><span class="nav-icon">Q</span>Quote requests <b id="navQuoteCount">0</b></button>
         <button class="nav-item" type="button" data-view="email"><span class="nav-icon">✉</span>Outbound email</button>
         <button class="nav-item" id="usersNav" type="button" data-view="users"><span class="nav-icon">U</span>Admin users <b id="navUserCount">0</b></button>
+        <button class="nav-item" type="button" data-view="feedback"><span class="nav-icon">!</span>Bugs &amp; suggestions <b id="navFeedbackCount">0</b></button>
       </nav>
       <div class="sidebar-foot"><div class="signed-in-user"><strong id="currentAdminName">Administrator</strong><span id="currentAdminEmail"></span></div><a href="../quote/index.html" target="_blank" rel="noopener">Open Request a Quote ↗</a><button id="logoutButton" type="button">Log out</button></div>
     </aside>
@@ -43,9 +44,10 @@
       </section>
 
       <section class="view" id="driversView" hidden>
-        <div class="view-intro"><div><h2>Driver pipeline</h2><p>Track each applicant through documents, partner hire, callback, orientation, and activation.</p></div><button class="button secondary" id="archiveToggle" type="button">View archive <span id="archiveCount">0</span></button></div>
+        <div class="view-intro"><div><h2>Driver pipeline</h2><p>Track each applicant through documents, partner hire, callback, orientation, and activation.</p></div><div class="view-intro-actions"><button class="button secondary" id="untouchedToggle" type="button">Show untouched leads <span id="untouchedCount">0</span></button><button class="button secondary" id="archiveToggle" type="button">View archive <span id="archiveCount">0</span></button></div></div>
         <div class="toolbar"><label class="search"><span class="sr-only">Search drivers</span><input id="driverSearch" type="search" placeholder="Search name, phone, email, or notes"></label><label><span class="sr-only">Application status</span><select id="applicationStatusFilter"><option value="all">All applications</option><option value="draft">Incomplete applications</option><option value="submitted">Submitted applications</option></select></label><label><span class="sr-only">Driver type</span><select id="driverTypeFilter"><option value="all">All driver types</option><option value="owner_operator">Owner-operators</option><option value="company_driver">Company drivers</option></select></label><label><span class="sr-only">Document status</span><select id="documentFilter"><option value="all">All document statuses</option><option value="missing_cdl">Missing CDL</option><option value="missing_medical">Missing medical card</option><option value="complete">Documents complete</option><option value="expired">Medical card expired</option></select></label></div>
         <div class="pipeline" id="pipeline">
+          <section class="pipeline-column stage-untouched" id="untouchedSection" hidden><header><div><span class="step-number">0</span><div><h3>Untouched leads</h3><p>No notes, callback, or call yet</p></div></div><b id="untouchedColumnCount">0</b></header><div class="card-list" id="untouchedColumn"></div></section>
           <section class="pipeline-column stage-phone"><header><div><span class="step-number">1</span><div><h3>Talk on phone</h3><p>New applicants to contact</p></div></div><b id="phoneColumnCount">0</b></header><div class="card-list" id="phoneColumn"></div></section>
           <section class="pipeline-column stage-docs"><header><div><span class="step-number">2</span><div><h3>Documents requested</h3><p>Collect CDL and medical card</p></div></div><b id="docsColumnCount">0</b></header><div class="card-list" id="docsColumn"></div></section>
           <section class="pipeline-column stage-ready"><header><div><span class="step-number">3</span><div><h3>Documents received</h3><p>Ready to be processed</p></div></div><b id="readyColumnCount">0</b></header><div class="card-list" id="readyColumn"></div></section>
@@ -79,6 +81,13 @@
         <div class="users-layout">
           <section class="home-panel user-create-panel"><div class="panel-head"><div><p class="eyebrow">New administrator</p><h3>Invite an employee</h3></div></div><form id="userForm" class="user-form"><label for="userFullName">Full name</label><input id="userFullName" maxlength="120" autocomplete="name" required><label for="userEmail">Email</label><input id="userEmail" type="email" maxlength="180" autocomplete="email" placeholder="name@worldwidecargoexpressllc.com" required><label for="userSenderProfile">Send as</label><select id="userSenderProfile"><option value="">Employee first and last name</option></select><label for="userSenderEmail">Other send-as email</label><input id="userSenderEmail" type="email" maxlength="180" placeholder="dispatch@worldwidecargoexpressllc.com"><p class="form-note">Choose a company identity, or choose Other and enter the employee’s email address.</p><p class="error" id="userError" role="alert"></p><button class="button primary" id="inviteUserButton" type="submit">Send invitation</button></form></section>
           <section class="home-panel"><div class="panel-head"><div><p class="eyebrow">Access list</p><h3>Administrators</h3></div></div><p class="access-list-note">Open an employee to view their email and inbox access. Every employee starts with a personal first-name.last-name company address.</p><div class="admin-user-list" id="adminUserList"></div></section>
+        </div>
+      </section>
+      <section class="view" id="feedbackView" hidden>
+        <div class="view-intro"><div><h2>Bugs &amp; suggestions</h2><p>Report a problem or suggest an improvement. Everyone on the team can see this board.</p></div></div>
+        <div class="users-layout">
+          <section class="home-panel"><div class="panel-head"><div><p class="eyebrow">New item</p><h3>Submit a bug or suggestion</h3></div></div><form id="feedbackForm" class="user-form"><label for="feedbackKind">Type</label><select id="feedbackKind"><option value="bug">Bug</option><option value="suggestion">Suggestion</option></select><label for="feedbackTitle">Title</label><input id="feedbackTitle" maxlength="160" placeholder="Short summary" required><label for="feedbackBody">Details</label><textarea id="feedbackBody" maxlength="4000" rows="6" placeholder="What happened, where, and what you expected"></textarea><p class="error" id="feedbackError" role="alert"></p><button class="button primary" type="submit">Submit</button></form></section>
+          <section class="home-panel"><div class="panel-head"><div><p class="eyebrow">Team board</p><h3>All items</h3></div><label><span class="sr-only">Filter items</span><select id="feedbackStatusFilter" class="feedback-filter"><option value="open">Open</option><option value="completed">Completed</option><option value="all">All</option></select></label></div><div class="feedback-list" id="feedbackList"></div></section>
         </div>
       </section>
     </main>

@@ -1530,6 +1530,81 @@ async function createDriverNote(request: Request, env: Env, applicationId: strin
   return json({ ok: true, note: { id, application_id: applicationId, admin_user_id: principal.id, author_name: principal.fullName, body: noteBody, created_at: now } }, 201);
 }
 
+const FEEDBACK_KINDS = new Set(["bug", "suggestion"]);
+const FEEDBACK_STATUSES = new Set(["open", "in_progress", "completed"]);
+const FEEDBACK_COLUMNS = "id, kind, title, body, status, author_name, resolution_note, completed_at, created_at, updated_at";
+
+async function listFeedback(request: Request, env: Env): Promise<Response> {
+  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const result = await env.DB.prepare(
+    `SELECT ${FEEDBACK_COLUMNS} FROM feedback_items ORDER BY CASE status WHEN 'completed' THEN 1 ELSE 0 END, created_at DESC LIMIT 500`,
+  ).all();
+  return json({ ok: true, items: result.results });
+}
+
+async function createFeedback(request: Request, env: Env): Promise<Response> {
+  const principal = await hasAdminSession(request, env);
+  if (!principal) return errorResponse("Unauthorized.", 401);
+  const body = await readJson(request);
+  const kind = typeof body?.kind === "string" ? body.kind : "";
+  const title = typeof body?.title === "string" ? body.title.trim() : "";
+  const details = typeof body?.body === "string" ? body.body.trim() : "";
+  if (!FEEDBACK_KINDS.has(kind)) return errorResponse("Choose bug or suggestion.", 400);
+  if (!title || title.length > 160) return errorResponse("Enter a short title (160 characters max).", 400);
+  if (details.length > 4000) return errorResponse("Keep the details under 4,000 characters.", 400);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    "INSERT INTO feedback_items (id, kind, title, body, created_by, author_name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+  ).bind(id, kind, title, details, principal.id, principal.fullName, now).run();
+  await auditAdmin(env, principal, "feedback.created", "feedback", id, title);
+  return json({ ok: true, id }, 201);
+}
+
+async function setFeedbackStatus(env: Env, id: string, status: unknown, note: unknown): Promise<Response> {
+  if (typeof status !== "string" || !FEEDBACK_STATUSES.has(status)) return errorResponse("Invalid status.", 400);
+  const resolution = typeof note === "string" ? note.trim() : null;
+  if (resolution && resolution.length > 1000) return errorResponse("Keep the note under 1,000 characters.", 400);
+  const now = new Date().toISOString();
+  const result = await env.DB.prepare(
+    "UPDATE feedback_items SET status = ?1, resolution_note = COALESCE(?2, resolution_note), completed_at = CASE WHEN ?1 = 'completed' THEN ?3 ELSE NULL END, updated_at = ?3 WHERE id = ?4",
+  ).bind(status, resolution, now, id).run();
+  if (result.meta.changes !== 1) return errorResponse("Item not found.", 404);
+  return json({ ok: true });
+}
+
+async function updateFeedback(request: Request, env: Env, id: string): Promise<Response> {
+  const principal = await hasAdminSession(request, env);
+  if (!principal) return errorResponse("Unauthorized.", 401);
+  if (!isMaster(principal)) return errorResponse("Only the Master Admin can check off items.", 403);
+  const body = await readJson(request);
+  const response = await setFeedbackStatus(env, id, body?.status, body?.note);
+  if (response.ok) await auditAdmin(env, principal, "feedback.status", "feedback", id, String(body?.status));
+  return response;
+}
+
+// Token-authenticated access for the maintenance worker that resolves board items.
+async function hasAutomationToken(request: Request, env: Env): Promise<boolean> {
+  const expected = (env as unknown as { AUTOMATION_TOKEN?: string }).AUTOMATION_TOKEN;
+  const header = request.headers.get("authorization") ?? "";
+  if (!expected || !header.startsWith("Bearer ")) return false;
+  return secureEqual(header.slice(7), expected);
+}
+
+async function automationListFeedback(request: Request, env: Env): Promise<Response> {
+  if (!(await hasAutomationToken(request, env))) return errorResponse("Unauthorized.", 401);
+  const status = new URL(request.url).searchParams.get("status") ?? "open";
+  if (!FEEDBACK_STATUSES.has(status)) return errorResponse("Invalid status.", 400);
+  const result = await env.DB.prepare(`SELECT ${FEEDBACK_COLUMNS} FROM feedback_items WHERE status = ?1 ORDER BY created_at ASC LIMIT 50`).bind(status).all();
+  return json({ ok: true, items: result.results });
+}
+
+async function automationUpdateFeedback(request: Request, env: Env, id: string): Promise<Response> {
+  if (!(await hasAutomationToken(request, env))) return errorResponse("Unauthorized.", 401);
+  const body = await readJson(request);
+  return setFeedbackStatus(env, id, body?.status, body?.note);
+}
+
 async function updateRecruitingApplication(request: Request, env: Env, applicationId: string): Promise<Response> {
   if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
   const body = await readJson(request);
@@ -1761,6 +1836,13 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   const adminUserMatch = path.match(/^\/api\/admin\/users\/([0-9a-f-]{36})$/u);
   if (adminUserMatch && request.method === "PATCH") return updateAdminUser(request, env, adminUserMatch[1]);
   if (adminUserMatch && request.method === "DELETE") return deleteAdminUser(request, env, adminUserMatch[1]);
+  if (request.method === "GET" && path === "/api/admin/feedback") return listFeedback(request, env);
+  if (request.method === "POST" && path === "/api/admin/feedback") return createFeedback(request, env);
+  const adminFeedbackMatch = path.match(/^\/api\/admin\/feedback\/([0-9a-f-]{36})$/u);
+  if (adminFeedbackMatch && request.method === "PATCH") return updateFeedback(request, env, adminFeedbackMatch[1]);
+  if (request.method === "GET" && path === "/api/automation/feedback") return automationListFeedback(request, env);
+  const automationFeedbackMatch = path.match(/^\/api\/automation\/feedback\/([0-9a-f-]{36})$/u);
+  if (automationFeedbackMatch && request.method === "PATCH") return automationUpdateFeedback(request, env, automationFeedbackMatch[1]);
   if (request.method === "GET" && path === "/api/admin/applications") return listApplications(request, env);
   if (request.method === "GET" && path === "/api/admin/active-drivers") return listActiveDrivers(request, env);
   const adminAccountMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]{36})$/u);
