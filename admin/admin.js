@@ -29,6 +29,9 @@
   function callbackIsOverdue(app) { if (!app.callback_date || !app.callback_time || app.callback_completed_at) return false; const now = centralNow(), [hour, minute] = app.callback_time.split(":").map(Number); return app.callback_date < now.date || (app.callback_date === now.date && hour * 60 + minute <= now.minutes); }
   function callbackDateLabel(value) { if (!value) return ""; const [year, month, day] = value.split("-").map(Number); return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" }).format(new Date(Date.UTC(year, month - 1, day, 12))); }
   function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; }
+  const referredSection = element("section", "pipeline-column stage-partner"), referredColumn = element("div", "card-list"), referredCount = element("b", "", "0");
+  referredSection.innerHTML = '<header><div><span class="step-number">R</span><div><h3>Referred drivers</h3><p>Drivers referred to a partner</p></div></div></header>';
+  referredSection.querySelector("header").append(referredCount); referredSection.append(referredColumn); ui.pipeline.append(referredSection);
   function empty(container, text) { container.replaceChildren(element("div", "empty-column", text)); }
 
   function switchView(view) {
@@ -124,6 +127,7 @@
     expanded.append(applicationDetails(app), driverNotes(app));
     const actions = element("div", "driver-actions");
     actions.append(actionButton("Add note", "", "add-note"));
+    if (!archived) actions.append(actionButton(app.referred_at ? "Return to pipeline" : "Refer driver", "", "toggle-referred"));
     if (!archived && stage === "phone_screen") actions.append(actionButton(app.callback_date && !app.callback_completed_at ? "Reschedule callback" : "Set callback", "", "schedule-callback"));
     if (!archived && stage === "phone_screen" && callbackIsOverdue(app)) { const callbackEmail = actionButton("Send callback email", "next", "send-missed-callback-email", !app.email); if (!app.email) callbackEmail.title = "Applicant email is missing"; actions.append(callbackEmail); }
     // Keep uploaded documents accessible after the applicant changes stages.
@@ -161,9 +165,9 @@
   }
 
   function renderDrivers() {
-    const active = filteredApplications(false), archived = filteredApplications(true), groups = { untouched: [], phone_screen: [], docs_requested: [], docs_received: [], documents_processed: [], sold_hired_partner: [], callback_hired: [], orientation_complete: [] };
-    active.forEach((app) => groups[pipelineColumn(app)].push(app));
-    const columns = [[ui.untouchedColumn, ui.untouchedColumnCount, groups.untouched, "No untouched leads."], [ui.phoneColumn, ui.phoneColumnCount, groups.phone_screen, "No applicants are waiting for a call."], [ui.docsColumn, ui.docsColumnCount, groups.docs_requested, "No applicants are waiting on documents."], [ui.readyColumn, ui.readyColumnCount, groups.docs_received, "No complete driver packets yet."], [ui.processedColumn, ui.processedColumnCount, groups.documents_processed, "No processed driver packets yet."], [ui.partnerColumn, ui.partnerColumnCount, groups.sold_hired_partner, "No partner hires recorded yet."], [ui.callbackColumn, ui.callbackColumnCount, groups.callback_hired, "No drivers waiting on orientation."], [ui.orientationColumn, ui.orientationColumnCount, groups.orientation_complete, "No drivers have completed orientation yet."]];
+    const active = filteredApplications(false), archived = filteredApplications(true), groups = { untouched: [], referred: [], phone_screen: [], docs_requested: [], docs_received: [], documents_processed: [], sold_hired_partner: [], callback_hired: [], orientation_complete: [] };
+    active.forEach((app) => groups[app.referred_at ? "referred" : pipelineColumn(app)].push(app));
+    const columns = [[ui.untouchedColumn, ui.untouchedColumnCount, groups.untouched, "No untouched leads."], [ui.phoneColumn, ui.phoneColumnCount, groups.phone_screen, "No applicants are waiting for a call."], [ui.docsColumn, ui.docsColumnCount, groups.docs_requested, "No applicants are waiting on documents."], [ui.readyColumn, ui.readyColumnCount, groups.docs_received, "No complete driver packets yet."], [ui.processedColumn, ui.processedColumnCount, groups.documents_processed, "No processed driver packets yet."], [ui.partnerColumn, ui.partnerColumnCount, groups.sold_hired_partner, "No partner hires recorded yet."], [ui.callbackColumn, ui.callbackColumnCount, groups.callback_hired, "No drivers waiting on orientation."], [ui.orientationColumn, ui.orientationColumnCount, groups.orientation_complete, "No drivers have completed orientation yet."], [referredColumn, referredCount, groups.referred, "No referred drivers."]];
     for (const [container, count, items, message] of columns) { count.textContent = items.length; if (!items.length) empty(container, message); else container.replaceChildren(...items.map((app) => driverCard(app))); }
     ui.untouchedCount.textContent = groups.untouched.length;
     ui.untouchedSection.hidden = !showingUntouched;
@@ -313,6 +317,7 @@
         await patchApplication(app.id, { stage: nextStage, manualOverride: true });
       }
       if (button.dataset.action === "request-docs") await patchApplication(app.id, { stage: "docs_requested" });
+      if (button.dataset.action === "toggle-referred") await patchApplication(app.id, { referred: !app.referred_at });
       if (button.dataset.action === "docs-complete") await patchApplication(app.id, { stage: "docs_received" });
       if (button.dataset.action === "process-documents") await patchApplication(app.id, { stage: "documents_processed" });
       if (button.dataset.action === "callback-hired") await patchApplication(app.id, { stage: "callback_hired" });

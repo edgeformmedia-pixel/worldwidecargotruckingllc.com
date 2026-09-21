@@ -32,6 +32,7 @@ type ApplicationRow = {
   callback_time?: string | null;
   callback_completed_at?: string | null;
   orientation_completed_at?: string | null;
+  referred_at?: string | null;
   archived_at?: string | null;
   sent_to?: string;
   sent_at?: string | null;
@@ -1500,10 +1501,10 @@ async function listApplications(request: Request, env: Env): Promise<Response> {
   const allowedStatus = status === "draft" || status === "submitted" ? status : null;
   const statement = allowedStatus
     ? env.DB.prepare(
-      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, callback_date, callback_time, callback_completed_at, orientation_completed_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, callback_date, callback_time, callback_completed_at, orientation_completed_at, referred_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications WHERE status = ?1 ORDER BY updated_at DESC LIMIT 500",
     ).bind(allowedStatus)
     : env.DB.prepare(
-      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, callback_date, callback_time, callback_completed_at, orientation_completed_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
+      "SELECT id, account_id, driver_type, full_name, phone, email, gender, experience, truck_year, truck_mileage, has_plate, amazon_relay_experience, start_availability, benefits_needed, cdl_document_uploaded_at, medical_card_uploaded_at, medical_card_expiration, recruiting_stage, talked_to_at, docs_requested_at, callback_date, callback_time, callback_completed_at, orientation_completed_at, referred_at, archived_at, sent_to, sent_at, partner_company, partner_note, current_step, status, created_at, updated_at, submitted_at FROM applications ORDER BY updated_at DESC LIMIT 500",
     );
   const [result, noteResult] = await Promise.all([
     statement.all<ApplicationRow>(),
@@ -1624,6 +1625,11 @@ async function updateRecruitingApplication(request: Request, env: Env, applicati
   if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
   const body = await readJson(request);
   const now = new Date().toISOString();
+  if (body?.referred === true || body?.referred === false) {
+    const result = await env.DB.prepare("UPDATE applications SET referred_at = ?1, updated_at = ?2 WHERE id = ?3 AND archived_at IS NULL").bind(body.referred ? now : null, now, applicationId).run();
+    if (result.meta.changes !== 1) return errorResponse("Application not found.", 404);
+    return json({ ok: true });
+  }
   if (body?.archive === true || body?.archive === false) {
     const archivedAt = body.archive ? now : null;
     const result = await env.DB.prepare("UPDATE applications SET archived_at = ?1, updated_at = ?2 WHERE id = ?3 AND status IN ('draft', 'submitted')")
