@@ -693,6 +693,21 @@ async function requestMedicalCardEmail(request: Request, env: Env, applicationId
   return json({ ok: true, message: `Medical card request sent to ${email}.` });
 }
 
+async function sendMissedCallbackEmail(request: Request, env: Env, applicationId: string): Promise<Response> {
+  if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
+  const app = await env.DB.prepare("SELECT id, full_name, email, callback_date, callback_time, callback_completed_at FROM applications WHERE id = ?1 AND status = 'submitted' AND archived_at IS NULL LIMIT 1").bind(applicationId).first<Pick<ApplicationRow, "id" | "full_name" | "email" | "callback_date" | "callback_time" | "callback_completed_at">>();
+  if (!app || app.callback_completed_at || !app.callback_date || !app.callback_time) return errorResponse("This driver does not have a missed callback.", 400);
+  const [hours, minutes] = app.callback_time.split(":").map(Number);
+  if (!(app.callback_date < currentCentralDate() || (app.callback_date === currentCentralDate() && hours * 60 + minutes <= currentCentralMinutes()))) return errorResponse("The callback time has not passed yet.", 400);
+  const email = app.email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) return errorResponse("This applicant does not have a valid email address.", 400);
+  const firstName = app.full_name.trim().split(/\s+/u)[0] || "there";
+  const text = `Hi ${firstName},\n\nWe tried reaching you about your driver application with Worldwide Cargo Express. Please give us a call back at your earliest convenience so we can continue the process.\n\nThank you,\nWorldwide Cargo Express`;
+  try { await sendEmail(env, { to: email, subject: "We tried reaching you", text, html: emailShell("We tried reaching you", text) }); }
+  catch { return errorResponse("We couldn’t send the callback email. Please try again.", 503); }
+  return json({ ok: true, message: `Callback email sent to ${email}.` });
+}
+
 async function downloadCdl(request: Request, env: Env, id: string): Promise<Response> {
   if (!(await hasAdminSession(request, env))) return errorResponse("Unauthorized.", 401);
   const application = await env.DB.prepare(
@@ -1854,6 +1869,8 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   if (activeDriverEditMatch && request.method === "PATCH") return updateActiveDriver(request, env, activeDriverEditMatch[1]);
   const medicalCardRequestMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/request-medical-card$/u);
   if (medicalCardRequestMatch && request.method === "POST") return requestMedicalCardEmail(request, env, medicalCardRequestMatch[1]);
+  const missedCallbackMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/send-missed-callback-email$/u);
+  if (missedCallbackMatch && request.method === "POST") return sendMissedCallbackEmail(request, env, missedCallbackMatch[1]);
   const cdlDownloadMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/documents\/cdl$/u);
   if (cdlDownloadMatch && request.method === "GET") return downloadCdl(request, env, cdlDownloadMatch[1]);
   const medicalCardDownloadMatch = path.match(/^\/api\/admin\/applications\/([0-9a-f-]{36})\/documents\/medical-card$/u);

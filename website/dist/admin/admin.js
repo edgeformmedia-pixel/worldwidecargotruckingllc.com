@@ -125,6 +125,7 @@
     const actions = element("div", "driver-actions");
     actions.append(actionButton("Add note", "", "add-note"));
     if (!archived && stage === "phone_screen") actions.append(actionButton(app.callback_date && !app.callback_completed_at ? "Reschedule callback" : "Set callback", "", "schedule-callback"));
+    if (!archived && stage === "phone_screen" && callbackIsOverdue(app)) { const callbackEmail = actionButton("Send callback email", "next", "send-missed-callback-email", !app.email); if (!app.email) callbackEmail.title = "Applicant email is missing"; actions.append(callbackEmail); }
     // Keep uploaded documents accessible after the applicant changes stages.
     if (app.cdl_document_uploaded_at) actions.append(documentLink(app, "cdl", "View CDL"));
     if (app.medical_card_uploaded_at) actions.append(documentLink(app, "medical-card", "View medical card"));
@@ -326,6 +327,7 @@
         alert(data.message || `Medical card request sent to ${app.email}.`);
         button.disabled = false;
       }
+      if (button.dataset.action === "send-missed-callback-email") { const response = await fetch(`/api/admin/applications/${app.id}/send-missed-callback-email`, { method: "POST" }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Unable to send the callback email."); alert(data.message || `Callback email sent to ${app.email}.`); button.disabled = false; }
       if (button.dataset.action === "partner-hire") { partnerTarget = app; ui.partnerDriverName.textContent = `Record the company ${app.full_name || "this driver"} was sold or hired to.`; ui.partnerCompany.value = app.partner_company || ""; ui.partnerNote.value = app.partner_note || ""; ui.partnerError.textContent = ""; ui.partnerDialog.showModal(); button.disabled = false; }
       if (button.dataset.action === "activate-driver") { activateTarget = app; ui.activateDriverName.textContent = `Enter payout and start date before adding ${app.full_name || "this driver"} to active accounting.`; ui.driverPayout.value = ""; ui.driverStartDate.value = ""; ui.paymentDelayWeeks.value = "1"; ui.activateError.textContent = ""; ui.activateForm.dataset.activeDriverId = ""; ui.activateDialog.showModal(); button.disabled = false; }
     } catch (error) { alert(error.message || "Unable to update applicant."); button.disabled = false; }
