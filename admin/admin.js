@@ -98,30 +98,30 @@
   }
 
   function driverCard(app, archived = false) {
-    const card = element("article", "driver-card"); card.dataset.id = app.id;
+    const card = element("details", "driver-card"); card.dataset.id = app.id;
+    if (!archived) { card.draggable = true; card.title = "Drag this lead to another pipeline column"; }
     const stage = applicationStage(app);
     const top = element("div", "driver-card-top"), identity = element("div"), name = element("h4", "", app.full_name || "Name not entered"), type = element("span", "type", app.driver_type === "owner_operator" ? "Owner-operator" : "Company driver"), age = element("span", "age", readableDate(app.submitted_at || app.updated_at));
     identity.append(name, type);
-    const status = element("div", "application-status");
-    if (app.status === "draft") status.append(element("span", "incomplete-pill", "Incomplete"), age);
-    else status.append(app.sent_at ? element("span", "sent-pill", "Sent") : age);
-    top.append(identity, status);
+    top.append(identity, age);
+    const summary = element("summary", "driver-card-summary"); summary.append(top);
+    const expanded = element("div", "driver-card-expanded");
     const contact = element("div", "contact");
     if (app.phone) { const phone = element("a", "", app.phone); phone.href = `tel:${app.phone}`; contact.append(phone); }
     if (app.email) { const email = element("a", "", app.email); email.href = `mailto:${app.email}`; contact.append(email); }
     const docs = element("div", "doc-checks"); docs.append(documentBadge("CDL", Boolean(app.cdl_document_uploaded_at)), documentBadge("Medical card", Boolean(app.medical_card_uploaded_at), isExpired(app)));
-    card.append(top, contact, docs);
+    expanded.append(contact, docs);
     if (stage === "phone_screen" && app.callback_date && app.callback_time && !app.callback_completed_at) {
       const overdue = callbackIsOverdue(app), appointment = element("div", `callback-appointment${overdue ? " overdue" : ""}`), label = element("span", overdue ? "callback-alert" : "", overdue ? "" : "Callback appointment"), detail = element("strong", "", `${callbackDateLabel(app.callback_date)} at ${timeLabel(app.callback_time)} CT`);
       if (overdue) { const symbol = element("b", "", "!"); symbol.setAttribute("aria-hidden", "true"); label.append(symbol, document.createTextNode("Callback overdue")); appointment.setAttribute("role", "alert"); }
-      appointment.append(label, detail); card.append(appointment);
+      appointment.append(label, detail); expanded.append(appointment);
     }
-    if (app.benefits_needed === "yes") card.append(element("p", "benefits-requested", "✓ Benefits follow-up requested"));
-    if (app.status === "draft") card.append(element("p", "incomplete-note", "This applicant started the form but has not submitted it yet."));
-    if (app.medical_card_expiration) card.append(element("p", "driver-note", `Medical card expires ${readableDate(app.medical_card_expiration)}${isExpired(app) ? " — expired" : ""}`));
-    if (app.partner_company) card.append(element("p", "driver-note", `Sold / hired to ${app.partner_company}${app.partner_note ? ` — ${app.partner_note}` : ""}`));
-    if (app.orientation_completed_at) card.append(element("p", "driver-note", `Orientation completed ${readableDate(app.orientation_completed_at)}`));
-    card.append(applicationDetails(app), driverNotes(app));
+    if (app.benefits_needed === "yes") expanded.append(element("p", "benefits-requested", "✓ Benefits follow-up requested"));
+    if (app.status === "draft") expanded.append(element("p", "incomplete-note", "This applicant started the form but has not submitted it yet."));
+    if (app.medical_card_expiration) expanded.append(element("p", "driver-note", `Medical card expires ${readableDate(app.medical_card_expiration)}${isExpired(app) ? " — expired" : ""}`));
+    if (app.partner_company) expanded.append(element("p", "driver-note", `Sold / hired to ${app.partner_company}${app.partner_note ? ` — ${app.partner_note}` : ""}`));
+    if (app.orientation_completed_at) expanded.append(element("p", "driver-note", `Orientation completed ${readableDate(app.orientation_completed_at)}`));
+    expanded.append(applicationDetails(app), driverNotes(app));
     const actions = element("div", "driver-actions");
     actions.append(actionButton("Add note", "", "add-note"));
     if (!archived && stage === "phone_screen") actions.append(actionButton(app.callback_date && !app.callback_completed_at ? "Reschedule callback" : "Set callback", "", "schedule-callback"));
@@ -149,7 +149,7 @@
       if (nextStage) { const override = actionButton(`Override to ${stageLabels[nextStage]}`, "next", "manual-next"); override.dataset.nextStage = nextStage; actions.append(override); }
       actions.append(actionButton("Archive", "archive", "archive"));
     }
-    if (actions.childElementCount) card.append(actions); return card;
+    if (actions.childElementCount) expanded.append(actions); card.append(summary, expanded); return card;
   }
 
   function documentLink(app, kind, label) { const link = element("a", "", label); link.href = `${window.WCX_API_ORIGIN || ""}/api/admin/applications/${app.id}/documents/${kind}`; link.target = "_blank"; link.rel = "noopener"; return link; }
@@ -349,7 +349,10 @@
   document.addEventListener("click", (event) => { const button = event.target.closest("[data-go]"); if (button) switchView(button.dataset.go); });
   [ui.driverSearch, ui.applicationStatusFilter, ui.driverTypeFilter, ui.documentFilter].forEach((control) => control.addEventListener("input", renderDrivers));
   [ui.quoteSearch, ui.quoteStatusFilter].forEach((control) => control.addEventListener("input", renderQuotes));
-  ui.untouchedColumn.addEventListener("click", driverAction); ui.phoneColumn.addEventListener("click", driverAction); ui.docsColumn.addEventListener("click", driverAction); ui.readyColumn.addEventListener("click", driverAction); ui.processedColumn.addEventListener("click", driverAction); ui.partnerColumn.addEventListener("click", driverAction); ui.callbackColumn.addEventListener("click", driverAction); ui.orientationColumn.addEventListener("click", driverAction); ui.archiveGrid.addEventListener("click", driverAction);
+  [[ui.phoneColumn, "phone_screen"], [ui.docsColumn, "docs_requested"], [ui.readyColumn, "docs_received"], [ui.processedColumn, "documents_processed"], [ui.partnerColumn, "sold_hired_partner"], [ui.callbackColumn, "callback_hired"], [ui.orientationColumn, "orientation_complete"]].forEach(([column, stage]) => { column.dataset.stage = stage; });
+  async function moveDriverToStage(id, stage) { if (stage === "orientation_complete") return patchApplication(id, { orientationComplete: true }); return patchApplication(id, { stage }); }
+  function setupPipelineDragAndDrop() { let draggedId = ""; ui.pipeline.addEventListener("dragstart", (event) => { const card = event.target.closest(".driver-card[draggable='true']"); if (!card) return; draggedId = card.dataset.id || ""; event.dataTransfer.setData("text/plain", draggedId); card.classList.add("dragging"); }); ui.pipeline.addEventListener("dragend", (event) => { event.target.closest(".driver-card")?.classList.remove("dragging"); ui.pipeline.querySelectorAll(".card-list.drop-target").forEach((list) => list.classList.remove("drop-target")); }); ui.pipeline.addEventListener("dragover", (event) => { const list = event.target.closest(".card-list[data-stage]"); if (!list) return; event.preventDefault(); list.classList.add("drop-target"); }); ui.pipeline.addEventListener("drop", async (event) => { const list = event.target.closest(".card-list[data-stage]"); if (!list) return; event.preventDefault(); list.classList.remove("drop-target"); const id = event.dataTransfer.getData("text/plain") || draggedId, stage = list.dataset.stage; if (!id || !stage) return; try { await moveDriverToStage(id, stage); } catch (error) { alert(error.message || "Unable to move applicant."); } }); }
+  ui.untouchedColumn.addEventListener("click", driverAction); ui.phoneColumn.addEventListener("click", driverAction); ui.docsColumn.addEventListener("click", driverAction); ui.readyColumn.addEventListener("click", driverAction); ui.processedColumn.addEventListener("click", driverAction); ui.partnerColumn.addEventListener("click", driverAction); ui.callbackColumn.addEventListener("click", driverAction); ui.orientationColumn.addEventListener("click", driverAction); ui.archiveGrid.addEventListener("click", driverAction); setupPipelineDragAndDrop();
   ui.untouchedToggle.addEventListener("click", () => { showingUntouched = !showingUntouched; renderDrivers(); });
   ui.archiveToggle.addEventListener("click", () => { showingArchive = !showingArchive; ui.pipeline.hidden = showingArchive; ui.archiveView.hidden = !showingArchive; ui.archiveToggle.firstChild.textContent = showingArchive ? "Back to pipeline " : "View archive "; });
   ui.quotesBody.addEventListener("change", async (event) => { const select = event.target.closest("select[data-quote]"); if (!select) return; select.disabled = true; try { const response = await fetch(`/api/admin/quotes/${select.dataset.quote}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: select.value }) }); if (!response.ok) throw new Error(); await refreshAll(); } catch { select.disabled = false; alert("Unable to update quote status."); } });

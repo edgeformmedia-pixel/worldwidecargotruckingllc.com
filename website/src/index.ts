@@ -1641,14 +1641,8 @@ async function updateRecruitingApplication(request: Request, env: Env, applicati
       "SELECT status, recruiting_stage, cdl_document_uploaded_at, medical_card_uploaded_at FROM applications WHERE id = ?1 AND archived_at IS NULL LIMIT 1",
     ).bind(applicationId).first<ApplicationRow>();
     if (!application) return errorResponse("Application not found.", 404);
-    const manualOverride = body?.manualOverride === true && application.status === "draft";
-    const currentStage = application.recruiting_stage || "phone_screen";
-    if (application.status === "draft" && (!manualOverride || NEXT_RECRUITING_STAGE[currentStage] !== stage)) {
-      return errorResponse("Choose the next stage and confirm the manual override.", 400);
-    }
-    if (!manualOverride && stage === "docs_received" && (!application.cdl_document_uploaded_at || !application.medical_card_uploaded_at)) {
-      return errorResponse("Both the CDL and medical card must be received first.", 400);
-    }
+    // This is a flexible lead board: administrators may move any applicant to
+    // any stage, including before their documents have been completed.
     await env.DB.prepare(
       "UPDATE applications SET recruiting_stage = ?1, talked_to_at = CASE WHEN ?1 != 'phone_screen' THEN COALESCE(talked_to_at, ?2) ELSE talked_to_at END, docs_requested_at = CASE WHEN ?1 = 'docs_requested' THEN COALESCE(docs_requested_at, ?2) ELSE docs_requested_at END, callback_completed_at = CASE WHEN ?1 = 'docs_requested' AND COALESCE(recruiting_stage, 'phone_screen') = 'phone_screen' THEN ?2 ELSE callback_completed_at END, updated_at = ?2 WHERE id = ?3",
     ).bind(stage, now, applicationId).run();
@@ -1892,7 +1886,12 @@ export default {
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Unknown error";
       console.error(JSON.stringify({ message: "request failed", error: message, path: new URL(request.url).pathname }));
-      return errorResponse("Internal server error.", 500);
+      // API requests normally receive CORS headers below. Keep them on failures too,
+      // otherwise the browser hides the useful 500 response as "Failed to fetch".
+      const origin = allowedOrigin(request, env);
+      return origin
+        ? json({ ok: false, error: "Internal server error." }, 500, corsHeaders(origin))
+        : errorResponse("Internal server error.", 500);
     }
   },
 } satisfies ExportedHandler<Env>;
